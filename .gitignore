@@ -1,0 +1,46 @@
+# Build artifacts
+/Builds/
+/build/
+/Build/
+/build*/         # falls mehrere Build-Configs
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Executables
+*.exe
+*.app
+*.out
+*.so
+*.dll
+*.dylib
+
+# JUCE-generated
+*.jucer
+*.sln
+*.vcxproj*
+*.xcodeproj
+
+# JUCE binary data
+BinaryData/
+
+# Logs
+*.log
+
+# CLion
+.idea/
+cmake-build-*/
+
+# VSCode
+.vscode/
+.vs/
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Tests
+Testing/
+CTestTestfile.cmake
+
