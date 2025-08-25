@@ -25,7 +25,8 @@ using juce::XmlElement;
 using juce::XmlDocument;
 using juce::ScopedPointer;
 
-ExtendedFileBrowser::ExtendedFileBrowser(const File& initialFileOrDirectory,const WildcardFileFilter* fileFilter, FileBrowserModel* model) : initialDir(initialFileOrDirectory) {
+ExtendedFileBrowser::ExtendedFileBrowser(const File& initialFileOrDirectory,const WildcardFileFilter* fileFilter, FileBrowserModel* model, bool leftPlayer) : initialDir(initialFileOrDirectory), 
+left(left){
     
     // addMouseListener(this, true);
     table = new TableListBox();
@@ -67,6 +68,8 @@ ExtendedFileBrowser::ExtendedFileBrowser(const File& initialFileOrDirectory,cons
     
     // loadState();
     
+      
+
     model->update();
 
     repaint();
@@ -142,6 +145,9 @@ void ExtendedFileBrowser::mouseDoubleClick(const juce::MouseEvent &event) {
                         f->getFileExtension().toLowerCase().contains("ogg")) {
                         sampler->stop();
                         sampler->loadSample(*f);
+                        if (onTrackLoadedCallback) {
+						    onTrackLoadedCallback(*f, left);
+                        }
                         sampler->play();
                     }
                 }

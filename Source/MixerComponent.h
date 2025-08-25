@@ -7,7 +7,7 @@
 */
 #pragma once
 #include <JuceHeader.h>
-
+#include "BPMAnalyzer.h"
 //==============================================================================
 /*
 */
@@ -113,6 +113,58 @@ public:
         rightLearnButton->onClick = [this]() { startMidiLearn(MidiTarget::RightVolume); };
         crossfaderLearnButton->onClick = [this]() { startMidiLearn(MidiTarget::Crossfader); };
 
+        // BPM Display und Controls
+        leftBPMLabel = std::make_unique<juce::Label>("", "120.0 BPM");
+        rightBPMLabel = std::make_unique<juce::Label>("", "120.0 BPM");
+        leftBPMLabel->setJustificationType(juce::Justification::centred);
+        rightBPMLabel->setJustificationType(juce::Justification::centred);
+        leftBPMLabel->setFont(12.0f);
+        rightBPMLabel->setFont(12.0f);
+        leftBPMLabel->setColour(juce::Label::backgroundColourId, juce::Colours::black);
+        rightBPMLabel->setColour(juce::Label::backgroundColourId, juce::Colours::black);
+        leftBPMLabel->setColour(juce::Label::textColourId, juce::Colours::lime);
+        rightBPMLabel->setColour(juce::Label::textColourId, juce::Colours::lime);
+        addAndMakeVisible(leftBPMLabel.get());
+        addAndMakeVisible(rightBPMLabel.get());
+
+        // Pitch/Tempo Slider (±8% wie bei echten DJ Mixern)
+        leftPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearVertical, juce::Slider::NoTextBox);
+        rightPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearVertical, juce::Slider::NoTextBox);
+        leftPitchSlider->setRange(-0.08, 0.08, 0.001); // ±8%
+        rightPitchSlider->setRange(-0.08, 0.08, 0.001);
+        leftPitchSlider->setValue(0.0); // Center
+        rightPitchSlider->setValue(0.0);
+        leftPitchSlider->setSkewFactor(1.0);
+        rightPitchSlider->setSkewFactor(1.0);
+        addAndMakeVisible(leftPitchSlider.get());
+        addAndMakeVisible(rightPitchSlider.get());
+
+        // Pitch Labels
+        leftPitchLabel = std::make_unique<juce::Label>("", "PITCH");
+        rightPitchLabel = std::make_unique<juce::Label>("", "PITCH");
+        leftPitchLabel->setJustificationType(juce::Justification::centred);
+        rightPitchLabel->setJustificationType(juce::Justification::centred);
+        leftPitchLabel->setFont(10.0f);
+        rightPitchLabel->setFont(10.0f);
+        addAndMakeVisible(leftPitchLabel.get());
+        addAndMakeVisible(rightPitchLabel.get());
+
+        // Sync Buttons
+        leftSyncButton = std::make_unique<juce::TextButton>("SYNC");
+        rightSyncButton = std::make_unique<juce::TextButton>("SYNC");
+        leftSyncButton->setColour(juce::TextButton::buttonColourId, juce::Colours::darkblue);
+        rightSyncButton->setColour(juce::TextButton::buttonColourId, juce::Colours::darkblue);
+        addAndMakeVisible(leftSyncButton.get());
+        addAndMakeVisible(rightSyncButton.get());
+
+        // Sync Button Callbacks
+        leftSyncButton->onClick = [this]() { syncLeftToRight(); };
+        rightSyncButton->onClick = [this]() { syncRightToLeft(); };
+
+        // BPM Analyzer
+        leftBPMAnalyzer = std::make_unique<BPMAnalyzer>();
+        rightBPMAnalyzer = std::make_unique<BPMAnalyzer>();
+
         // Reset MIDI mappings
         resetMidiMappings();
     }
@@ -197,7 +249,7 @@ public:
             if (leftDeckArea.getHeight() >= 25)
             {
                 auto leftLabelArea = leftDeckArea.removeFromTop(25);
-				if (leftLabel)
+                if (leftLabel)
                     leftLabel->setBounds(leftLabelArea);
             }
 
@@ -208,7 +260,7 @@ public:
             if (leftDeckArea.getHeight() >= 250)
             {
                 auto leftSliderArea = leftDeckArea.removeFromTop(250);
-				if (leftSlider)
+                if (leftSlider)
                     leftSlider->setBounds(leftSliderArea.reduced(juce::jmin(20, leftSliderArea.getWidth() / 4), 0));
             }
 
@@ -231,7 +283,7 @@ public:
             {
                 auto leftCCArea = leftDeckArea.removeFromTop(20);
 				if (leftCCLabel)
-                    leftCCLabel->setBounds(leftCCArea); 
+                    leftCCLabel->setBounds(leftCCArea);
             }
 
             if (leftDeckArea.getHeight() >= 10)
@@ -253,6 +305,14 @@ public:
                 auto leftOutputComboArea = leftDeckArea.removeFromTop(25);
 				if (leftOutputCombo)
                     leftOutputCombo->setBounds(leftOutputComboArea);
+            }
+
+            if (leftDeckArea.getHeight() >= 5)
+                leftDeckArea.removeFromTop(25); // Spacer
+
+            if (leftSyncButton) {
+                leftSyncButton->setBounds(leftDeckArea);
+				leftSyncButton->setSize(leftDeckArea.getWidth(), 30);
             }
         }
 
@@ -298,7 +358,7 @@ public:
             if (rightDeckArea.getHeight() >= 20)
             {
                 auto rightCCArea = rightDeckArea.removeFromTop(20);
-				if (rightCCLabel)
+                if (rightCCLabel)
                     rightCCLabel->setBounds(rightCCArea);
             }
 
@@ -322,7 +382,18 @@ public:
 				if (rightOutputCombo)
                     rightOutputCombo->setBounds(rightOutputComboArea);
             }
+
+            if (rightDeckArea.getHeight() >= 5)
+                rightDeckArea.removeFromTop(25); // Spacer
+
+            if (rightSyncButton) {
+                rightSyncButton->setBounds(rightDeckArea);
+				rightSyncButton->setSize(rightDeckArea.getWidth(), 30);
+            }
+
         }
+
+
 
         // === CROSSFADER SECTION (unten, über beide Decks) ===
         auto totalBounds = getLocalBounds();
@@ -360,6 +431,7 @@ public:
                 {
                     auto crossfaderControlsArea = crossfaderMainArea.removeFromTop(25);
                     auto crossfaderLearnArea = crossfaderControlsArea.removeFromLeft(100);
+
 					if (crossfaderLearnButton)
                         crossfaderLearnButton->setBounds(crossfaderLearnArea);
 
@@ -494,6 +566,78 @@ public:
         crossfaderCCLabel->setText("CC: -", juce::dontSendNotification);
     }
 
+    // BPM und Sync Funktionen
+    void analyzeBPMFromFile(const juce::File& audioFile, bool isLeftDeck)
+    {
+        if (isLeftDeck)
+        {
+            leftBPMAnalyzer->analyzeFile(audioFile);
+            updateBPMDisplay(true);
+        }
+        else
+        {
+            rightBPMAnalyzer->analyzeFile(audioFile);
+            updateBPMDisplay(false);
+        }
+    }
+
+    void updateBPMDisplay(bool isLeftDeck)
+    {
+        if (isLeftDeck && leftBPMAnalyzer->isAnalysisComplete())
+        {
+            double bpm = leftBPMAnalyzer->getBPM();
+            leftBPMLabel->setText(juce::String(bpm, 1) + " BPM", juce::dontSendNotification);
+        }
+        else if (!isLeftDeck && rightBPMAnalyzer->isAnalysisComplete())
+        {
+            double bpm = rightBPMAnalyzer->getBPM();
+            rightBPMLabel->setText(juce::String(bpm, 1) + " BPM", juce::dontSendNotification);
+        }
+    }
+
+    void syncLeftToRight()
+    {
+        if (leftBPMAnalyzer->isAnalysisComplete() && rightBPMAnalyzer->isAnalysisComplete())
+        {
+            double leftBPM = leftBPMAnalyzer->getBPM();
+            double rightBPM = rightBPMAnalyzer->getBPM();
+            double syncRatio = BPMAnalyzer::calculateSyncRatio(leftBPM, rightBPM);
+
+            // Pitch-Anpassung: 1.0 = kein Pitch, 1.05 = +5%, 0.95 = -5%
+            double pitchAdjust = (syncRatio - 1.0);
+            leftPitchSlider->setValue(juce::jlimit(-0.08, 0.08, pitchAdjust), juce::sendNotificationSync);
+
+            // Visual Feedback
+            leftSyncButton->setColour(juce::TextButton::buttonColourId, juce::Colours::green);
+            juce::Timer::callAfterDelay(2000, [this]() {
+                leftSyncButton->setColour(juce::TextButton::buttonColourId, juce::Colours::darkblue);
+                });
+        }
+    }
+
+    void syncRightToLeft()
+    {
+        if (leftBPMAnalyzer->isAnalysisComplete() && rightBPMAnalyzer->isAnalysisComplete())
+        {
+            double leftBPM = leftBPMAnalyzer->getBPM();
+            double rightBPM = rightBPMAnalyzer->getBPM();
+            double syncRatio = BPMAnalyzer::calculateSyncRatio(rightBPM, leftBPM);
+
+            double pitchAdjust = (syncRatio - 1.0);
+            rightPitchSlider->setValue(juce::jlimit(-0.08, 0.08, pitchAdjust), juce::sendNotificationSync);
+
+            // Visual Feedback
+            rightSyncButton->setColour(juce::TextButton::buttonColourId, juce::Colours::green);
+            juce::Timer::callAfterDelay(2000, [this]() {
+                rightSyncButton->setColour(juce::TextButton::buttonColourId, juce::Colours::darkblue);
+                });
+        }
+    }
+
+    // Pitch-Werte für Audio-Engine
+    double getLeftPitch() const { return 1.0 + leftPitchSlider->getValue(); }
+    double getRightPitch() const { return 1.0 + rightPitchSlider->getValue(); }
+    
     // Audio-Funktionen mit Output Routing
     float getLeftGain() {
         float baseGain = (float)leftSlider->getValue();
@@ -573,6 +717,10 @@ public:
         return (float)crossfader->getValue();
     }
 
+    // Getter für ComboBoxes (für MainComponent)
+    juce::ComboBox* getLeftOutputCombo() const { return leftOutputCombo.get(); }
+    juce::ComboBox* getRightOutputCombo() const { return rightOutputCombo.get(); }
+
     // Getter für MIDI Mappings (für Persistierung)
     int getLeftVolumeCC() const { return leftVolumeCC; }
     int getRightVolumeCC() const { return rightVolumeCC; }
@@ -591,8 +739,6 @@ public:
         crossfaderCC = cc;
         crossfaderCCLabel->setText(cc >= 0 ? "CC: " + juce::String(cc) : "CC: -", juce::dontSendNotification);
     }
-    juce::ComboBox* getLeftOutputCombo() const { return leftOutputCombo.get(); }
-    juce::ComboBox* getRightOutputCombo() const { return rightOutputCombo.get(); }
 
 private:
     // GUI Components
@@ -616,6 +762,20 @@ private:
     std::unique_ptr<juce::Label> leftCCLabel = nullptr;
     std::unique_ptr<juce::Label> rightCCLabel = nullptr;
     std::unique_ptr<juce::Label> crossfaderCCLabel = nullptr;
+
+    // GUI Components - BPM und Pitch
+    std::unique_ptr<juce::Label> leftBPMLabel = nullptr;
+    std::unique_ptr<juce::Label> rightBPMLabel = nullptr;
+    std::unique_ptr<juce::Slider> leftPitchSlider = nullptr;
+    std::unique_ptr<juce::Slider> rightPitchSlider = nullptr;
+    std::unique_ptr<juce::Label> leftPitchLabel = nullptr;
+    std::unique_ptr<juce::Label> rightPitchLabel = nullptr;
+    std::unique_ptr<juce::TextButton> leftSyncButton = nullptr;
+    std::unique_ptr<juce::TextButton> rightSyncButton = nullptr;
+
+    // BPM Analysis
+    std::unique_ptr<BPMAnalyzer> leftBPMAnalyzer = nullptr;
+    std::unique_ptr<BPMAnalyzer> rightBPMAnalyzer = nullptr;
 
     // MIDI Learning State
     bool isLearning = false;

@@ -60,9 +60,16 @@ class ExtendedFileBrowser : public juce::Component,
     
     
 public:
-    ExtendedFileBrowser(const juce::File& initialFileOrDirectory,const juce::WildcardFileFilter* fileFilter, FileBrowserModel* model);
+    ExtendedFileBrowser(const juce::File& initialFileOrDirectory,const juce::WildcardFileFilter* fileFilter, FileBrowserModel* model, bool left);
     ~ExtendedFileBrowser();
     
+    std::function<void(const juce::File&, bool)> onTrackLoadedCallback;
+
+    void setTrackLoadedCallback(std::function<void(const juce::File&, bool)> callback)
+    {
+        onTrackLoadedCallback = callback;
+    }
+
     void mouseDrag (const juce::MouseEvent& event) override;
     void mouseDoubleClick(const juce::MouseEvent& event) override;
     void mouseDown(const juce::MouseEvent& event) override;
@@ -101,5 +108,6 @@ private:
     Sampler* sampler;
     bool playing = false;
     std::vector<juce::Button*> driveButtons;
+    bool left = false;
 };
 

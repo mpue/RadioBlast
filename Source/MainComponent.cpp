@@ -21,7 +21,8 @@ MainComponent::MainComponent()
     leftFileBrowser = std::make_unique<ExtendedFileBrowser>(
         juce::File::getSpecialLocation(juce::File::userHomeDirectory),
         leftFilter.get(),
-        leftModel.get()
+        leftModel.get(),
+        true
     );
     leftDirectoryContents->addChangeListener(leftFileBrowser.get());
 
@@ -33,7 +34,8 @@ MainComponent::MainComponent()
     rightFileBrowser = std::make_unique<ExtendedFileBrowser>(
         juce::File::getSpecialLocation(juce::File::userHomeDirectory),
         rightFilter.get(),
-        rightModel.get()
+        rightModel.get(),
+        false
     );
     rightDirectoryContents->addChangeListener(rightFileBrowser.get());
 
@@ -66,6 +68,22 @@ MainComponent::MainComponent()
 
     setupMidiInputs();
     startThread(); // file watcher
+
+
+    if (leftFileBrowser)
+    {
+        leftFileBrowser->setTrackLoadedCallback([this](const juce::File& file, bool left) {
+            onTrackLoaded(file, true); // true = left deck
+        });
+    }
+
+    if (rightFileBrowser)
+    {
+        rightFileBrowser->setTrackLoadedCallback([this](const juce::File& file, bool left) {
+            onTrackLoaded(file, false); // false = right deck
+            });
+    }
+
     resized();
 }
 
@@ -265,109 +283,8 @@ void MainComponent::handleIncomingMidiMessage(MidiInput* source, const MidiMessa
 
 }
 
-void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
-{
-    bufferToFill.clearActiveBufferRegion();
-
-    Sampler* leftSampler = leftFileBrowser->getSampler();
-    Sampler* rightSampler = rightFileBrowser->getSampler();
-
-    auto* writableBuffer = const_cast<juce::AudioBuffer<float>*>(bufferToFill.buffer);
-    if (!writableBuffer) return;
-
-    float** outputData = const_cast<float**>(writableBuffer->getArrayOfWritePointers());
-    const int outNumChans = writableBuffer->getNumChannels();
-    if (!outputData || outNumChans < 2) return;
-
-    // Stereo Buffers für beide Sampler (nicht mono!)
-    std::vector<float> leftSamplerL(bufferToFill.numSamples, 0.0f);
-    std::vector<float> leftSamplerR(bufferToFill.numSamples, 0.0f);
-    std::vector<float> rightSamplerL(bufferToFill.numSamples, 0.0f);
-    std::vector<float> rightSamplerR(bufferToFill.numSamples, 0.0f);
-
-    // Left Sampler Audio generieren (Stereo beibehalten)
-    if (leftSampler && leftSampler->isPlaying()) {
-        for (int j = 0; j < bufferToFill.numSamples; ++j) {
-            leftSamplerL[j] = leftSampler->getOutput(0) * mixer->getLeftGain();
-            leftSamplerR[j] = leftSampler->getOutput(1) * mixer->getLeftGain();
-            leftSampler->nextSample();
-        }
-    }
-
-    // Right Sampler Audio generieren (Stereo beibehalten)
-    if (rightSampler && rightSampler->isPlaying()) {
-        for (int j = 0; j < bufferToFill.numSamples; ++j) {
-            rightSamplerL[j] = rightSampler->getOutput(0) * mixer->getRightGain();
-            rightSamplerR[j] = rightSampler->getOutput(1) * mixer->getRightGain();
-            rightSampler->nextSample();
-        }
-    }
-
-    // Output Routing anwenden
-    for (int j = 0; j < bufferToFill.numSamples; ++j) {
-
-        // Left Deck Routing
-        auto leftDest = mixer->getLeftChannelDestination();
-        switch (leftDest) {
-        case MixerComponent::OutputDestination::MasterLeft:
-            // Nur linken Kanal zu Master Left
-            if (outNumChans > 0) outputData[0][j] += leftSamplerL[j];
-            break;
-        case MixerComponent::OutputDestination::MasterRight:
-            // Nur rechten Kanal zu Master Right
-            if (outNumChans > 1) outputData[1][j] += leftSamplerR[j];
-            break;
-        case MixerComponent::OutputDestination::CueLeft:
-        case MixerComponent::OutputDestination::CueRight:
-            // Stereo zu beiden Cue-Kanälen (Kopfhörer brauchen Stereo!)
-            if (outNumChans > 2) outputData[2][j] += leftSamplerL[j]; // Cue Left
-            if (outNumChans > 3) outputData[3][j] += leftSamplerR[j]; // Cue Right
-            break;
-        case MixerComponent::OutputDestination::Muted:
-            // Nichts ausgeben
-            break;
-        }
-
-        // Für "Master L+R" - beide Kanäle zu Master Stereo
-        if (leftDest == MixerComponent::OutputDestination::MasterLeft &&
-            mixer->getLeftOutputCombo()->getSelectedId() == 1) // Master L+R
-        {
-            if (outNumChans > 0) outputData[0][j] += leftSamplerL[j]; // Links zu Master Left
-            if (outNumChans > 1) outputData[1][j] += leftSamplerR[j]; // Rechts zu Master Right
-        }
-
-        // Right Deck Routing
-        auto rightDest = mixer->getRightChannelDestination();
-        switch (rightDest) {
-        case MixerComponent::OutputDestination::MasterLeft:
-            // Nur linken Kanal zu Master Left
-            if (outNumChans > 0) outputData[0][j] += rightSamplerL[j];
-            break;
-        case MixerComponent::OutputDestination::MasterRight:
-            // Nur rechten Kanal zu Master Right
-            if (outNumChans > 1) outputData[1][j] += rightSamplerR[j];
-            break;
-        case MixerComponent::OutputDestination::CueLeft:
-        case MixerComponent::OutputDestination::CueRight:
-            // Stereo zu beiden Cue-Kanälen (Kopfhörer brauchen Stereo!)
-            if (outNumChans > 2) outputData[2][j] += rightSamplerL[j]; // Cue Left
-            if (outNumChans > 3) outputData[3][j] += rightSamplerR[j]; // Cue Right
-            break;
-        case MixerComponent::OutputDestination::Muted:
-            // Nichts ausgeben
-            break;
-        }
-
-        // Für "Master L+R" - beide Kanäle zu Master Stereo
-        if (rightDest == MixerComponent::OutputDestination::MasterRight &&
-            mixer->getRightOutputCombo()->getSelectedId() == 1) // Master L+R
-        {
-            if (outNumChans > 0) outputData[0][j] += rightSamplerL[j]; // Links zu Master Left
-            if (outNumChans > 1) outputData[1][j] += rightSamplerR[j]; // Rechts zu Master Right
-        }
-    }
-}
-void MainComponent::copyBufferFromSampler(const juce::AudioSourceChannelInfo& bufferToFill, Sampler* sampler, bool& retFlag, float gain)
+// MainComponent.cpp - erweiterte copyBufferFromSampler Methode
+void MainComponent::copyBufferFromSampler(const juce::AudioSourceChannelInfo& bufferToFill, Sampler* sampler, bool& retFlag, float gain, double pitchRatio)
 {
     retFlag = true;
     auto* writableBuffer = const_cast<juce::AudioBuffer<float>*>(bufferToFill.buffer);
@@ -378,17 +295,177 @@ void MainComponent::copyBufferFromSampler(const juce::AudioSourceChannelInfo& bu
     if (!outputData || outNumChans == 0) return;
 
     if (sampler && sampler->isPlaying()) {
-        for (int j = 0; j < bufferToFill.numSamples; ++j) {
-            float sL = sampler->getOutput(0) * gain;
-            float sR = sampler->getOutput(1) * gain;
-            if (outNumChans > 0 && outputData[0]) outputData[0][j] += sL;
-            if (outNumChans > 1 && outputData[1]) outputData[1][j] += sR;
-            sampler->nextSample();
+        // Pitch-Shifting durch Sample-Rate Manipulation
+        // Einfache Implementierung - für bessere Qualität würde man einen echten Pitch-Shifter nutzen
+
+        if (std::abs(pitchRatio - 1.0) < 0.001) {
+            // Kein Pitch-Shifting nötig
+            for (int j = 0; j < bufferToFill.numSamples; ++j) {
+                float sL = sampler->getOutput(0) * gain;
+                float sR = sampler->getOutput(1) * gain;
+                if (outNumChans > 0 && outputData[0]) outputData[0][j] += sL;
+                if (outNumChans > 1 && outputData[1]) outputData[1][j] += sR;
+                sampler->nextSample();
+            }
+        }
+        else {
+            // Pitch-Shifting durch Sample-Rate Änderung
+            static double leftPhase = 0.0;
+            static double rightPhase = 0.0;
+
+            for (int j = 0; j < bufferToFill.numSamples; ++j) {
+                // Linear interpolation für Pitch-Shifting
+                double intPart;
+                double fracPart = std::modf(leftPhase, &intPart);
+
+                // Aktuelle und nächste Samples holen
+                float sL_curr = sampler->getOutput(0) * gain;
+                float sR_curr = sampler->getOutput(1) * gain;
+
+                sampler->nextSample();
+
+                float sL_next = sampler->getOutput(0) * gain;
+                float sR_next = sampler->getOutput(1) * gain;
+
+                // Linear interpolation
+                float sL = sL_curr + fracPart * (sL_next - sL_curr);
+                float sR = sR_curr + fracPart * (sR_next - sR_curr);
+
+                if (outNumChans > 0 && outputData[0]) outputData[0][j] += sL;
+                if (outNumChans > 1 && outputData[1]) outputData[1][j] += sR;
+
+                // Phase für nächstes Sample
+                leftPhase += pitchRatio;
+                rightPhase += pitchRatio;
+
+                // Phase-Wrap verhindern
+                if (leftPhase >= 2.0) {
+                    leftPhase -= 1.0;
+                }
+            }
         }
     }
 
     retFlag = false;
 }
+
+// Erweiterte getNextAudioBlock mit Pitch-Shifting
+void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
+{
+    bufferToFill.clearActiveBufferRegion();
+
+    Sampler* leftSampler = leftFileBrowser->getSampler();
+    Sampler* rightSampler = rightFileBrowser->getSampler();
+
+    // Pitch-Werte von Mixer holen
+    double leftPitch = mixer->getLeftPitch();   // 1.0 = normal, 1.05 = +5%, 0.95 = -5%
+    double rightPitch = mixer->getRightPitch();
+
+    auto* writableBuffer = const_cast<juce::AudioBuffer<float>*>(bufferToFill.buffer);
+    if (!writableBuffer) return;
+
+    float** outputData = const_cast<float**>(writableBuffer->getArrayOfWritePointers());
+    const int outNumChans = writableBuffer->getNumChannels();
+    if (!outputData || outNumChans < 2) return;
+
+    // Stereo Buffers für beide Sampler (mit Pitch-Shifting)
+    std::vector<float> leftSamplerL(bufferToFill.numSamples, 0.0f);
+    std::vector<float> leftSamplerR(bufferToFill.numSamples, 0.0f);
+    std::vector<float> rightSamplerL(bufferToFill.numSamples, 0.0f);
+    std::vector<float> rightSamplerR(bufferToFill.numSamples, 0.0f);
+
+    // Left Sampler mit Pitch-Shifting
+    if (leftSampler && leftSampler->isPlaying()) {
+        generateSamplerOutputWithPitch(leftSampler, leftSamplerL, leftSamplerR,
+            bufferToFill.numSamples, mixer->getLeftGain(), leftPitch);
+    }
+
+    // Right Sampler mit Pitch-Shifting
+    if (rightSampler && rightSampler->isPlaying()) {
+        generateSamplerOutputWithPitch(rightSampler, rightSamplerL, rightSamplerR,
+            bufferToFill.numSamples, mixer->getRightGain(), rightPitch);
+    }
+
+    // Output Routing (wie gehabt)
+    for (int j = 0; j < bufferToFill.numSamples; ++j) {
+        // Left Deck Routing
+        auto leftDest = mixer->getLeftChannelDestination();
+        switch (leftDest) {
+        case MixerComponent::OutputDestination::CueLeft:
+        case MixerComponent::OutputDestination::CueRight:
+            if (outNumChans > 2) outputData[2][j] += leftSamplerL[j];
+            if (outNumChans > 3) outputData[3][j] += leftSamplerR[j];
+            break;
+        case MixerComponent::OutputDestination::Muted:
+            break;
+        default:
+            // Master Output Handling
+            if (mixer->getLeftOutputCombo()->getSelectedId() == 1) { // Master L+R
+                if (outNumChans > 0) outputData[0][j] += leftSamplerL[j];
+                if (outNumChans > 1) outputData[1][j] += leftSamplerR[j];
+            }
+            break;
+        }
+
+        // Right Deck Routing
+        auto rightDest = mixer->getRightChannelDestination();
+        switch (rightDest) {
+        case MixerComponent::OutputDestination::CueLeft:
+        case MixerComponent::OutputDestination::CueRight:
+            if (outNumChans > 2) outputData[2][j] += rightSamplerL[j];
+            if (outNumChans > 3) outputData[3][j] += rightSamplerR[j];
+            break;
+        case MixerComponent::OutputDestination::Muted:
+            break;
+        default:
+            if (mixer->getRightOutputCombo()->getSelectedId() == 1) { // Master L+R
+                if (outNumChans > 0) outputData[0][j] += rightSamplerL[j];
+                if (outNumChans > 1) outputData[1][j] += rightSamplerR[j];
+            }
+            break;
+        }
+    }
+}
+
+// Hilfsfunktion für Pitch-Shifting
+void MainComponent::generateSamplerOutputWithPitch(Sampler* sampler,
+    std::vector<float>& outputL,
+    std::vector<float>& outputR,
+    int numSamples, float gain, double pitch)
+{
+    static double phase = 0.0;
+
+    for (int i = 0; i < numSamples; ++i) {
+        if (std::abs(pitch - 1.0) < 0.001) {
+            // Kein Pitch-Shifting
+            outputL[i] = sampler->getOutput(0) * gain;
+            outputR[i] = sampler->getOutput(1) * gain;
+            sampler->nextSample();
+        }
+        else {
+            // Simple Pitch-Shifting durch Sample-Interpolation
+            double intPart;
+            double fracPart = std::modf(phase, &intPart);
+
+            float sL1 = sampler->getOutput(0) * gain;
+            float sR1 = sampler->getOutput(1) * gain;
+
+            sampler->nextSample();
+
+            float sL2 = sampler->getOutput(0) * gain;
+            float sR2 = sampler->getOutput(1) * gain;
+
+            // Linear interpolation
+            outputL[i] = sL1 + fracPart * (sL2 - sL1);
+            outputR[i] = sR1 + fracPart * (sR2 - sR1);
+
+            phase += pitch;
+            if (phase >= 2.0) phase -= 1.0;
+        }
+    }
+}
+
+// Erweiterte Header-Deklaration in MainComponent.h
 
 //==============================================================================
 void MainComponent::paint(juce::Graphics& g)

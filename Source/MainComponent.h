@@ -31,7 +31,7 @@ public:
     //==============================================================================
     void prepareToPlay (int samplesPerBlockExpected, double sampleRate) override;
     void getNextAudioBlock (const juce::AudioSourceChannelInfo& bufferToFill) override;
-    void copyBufferFromSampler(const juce::AudioSourceChannelInfo& bufferToFill, Sampler* sampler, bool& retFlag, float gain);
+    void copyBufferFromSampler(const juce::AudioSourceChannelInfo& bufferToFill, Sampler* sampler, bool& retFlag, float gain,double pitchRatio);
     void releaseResources() override;
 
     void handleIncomingMidiMessage(MidiInput* source, const MidiMessage& message) override;
@@ -48,6 +48,20 @@ public:
     void setupMidiInputs();
     void cleanupMidiInputs();
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
+
+
+    void generateSamplerOutputWithPitch(Sampler* sampler, std::vector<float>& outputL,
+        std::vector<float>& outputR, int numSamples,
+        float gain, double pitch);
+
+    // BPM Analysis Integration - wird aufgerufen wenn Track geladen wird
+    void onTrackLoaded(const juce::File& audioFile, bool isLeftDeck)
+    {
+        // BPM analysieren im Hintergrund
+        if (mixer) {
+            mixer->analyzeBPMFromFile(audioFile, isLeftDeck);
+        }
+    }
 
 private:
     //==============================================================================
