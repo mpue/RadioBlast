@@ -58,6 +58,7 @@ left(left){
 
     this->model = model;
     view  = new Viewport();
+    
     view->setTopLeftPosition(0,25);
     view->setViewedComponent(table);
 	view->setScrollBarsShown(true, false);
@@ -66,23 +67,18 @@ left(left){
 	sampler = new Sampler(44100, 512);
     table->addMouseListener(this, true);
     
-    // loadState();
-    
-      
-
+    loadState();
     model->update();
 
     repaint();
 }
 
 ExtendedFileBrowser::~ExtendedFileBrowser() {
-    // saveState();
     delete table;
     delete view;
     for (int i = 0; i < driveButtons.size(); i++) {
         delete driveButtons.at(i);
-    }
-        
+    }        
 }
 
 void ExtendedFileBrowser::mouseDrag(const juce::MouseEvent& event) {
@@ -200,6 +196,7 @@ void ExtendedFileBrowser::mouseDoubleClick(const juce::MouseEvent &event) {
         if (f->exists()) {
             if (f->isDirectory()) {
                 model->setCurrentDir(*f);
+                saveState();
             }
             else {
                 selectedFile = f;
@@ -220,7 +217,7 @@ void ExtendedFileBrowser::mouseDoubleClick(const juce::MouseEvent &event) {
                 else {
                     f->startAsProcess();
                 }
-
+                saveState();
 
                 sendChangeMessage();
             }
@@ -231,6 +228,7 @@ void ExtendedFileBrowser::mouseDoubleClick(const juce::MouseEvent &event) {
         File current = File(model->getCurrentDir());
         File parent = File(current.getParentDirectory());
         model->setCurrentDir(parent);
+        saveState();
     }
 
 }
@@ -330,68 +328,146 @@ DirectoryContentsList* FileBrowserModel::getDirectoryList() {
     return directoryList;
 }
 
-void ExtendedFileBrowser::saveState(){
-    String userHome = File::getSpecialLocation(File::userHomeDirectory).getFullPathName();
-    File appDir = File(userHome+"/.RadioBlast");
-    
-    if (!appDir.exists()) {
-        appDir.createDirectory();
-    }
-    
-    File configFile = File(userHome+"/.RadioBlast/state.xml");
-    
-    if (!configFile.exists()) {
-        configFile.create();
-    }
-    else {
-        configFile.deleteFile();
-        configFile = File(userHome+"/.RadioBlast/state.xml");
-    }
-    
-    ValueTree* v = new ValueTree("SavedState");
-    
-    ValueTree child = ValueTree("File");
-    child.setProperty("lastDirectory", model->getCurrentDir(), nullptr);
-    v->addChild(child, -1, nullptr);
-    
-    std::unique_ptr<OutputStream> os = configFile.createOutputStream();    
-    std::unique_ptr<XmlElement> xml = v->createXml();    
-    xml->writeToStream(*os, "");
-    
-    os = nullptr;
-    xml = nullptr;
+void ExtendedFileBrowser::saveState()
+{
+    try
+    {
+        String userHome = File::getSpecialLocation(File::userHomeDirectory).getFullPathName();
+        File appDir = File(userHome + "/.RadioBlast");
 
-    delete v;
-}
-
-void ExtendedFileBrowser::loadState() {
-    String userHome = File::getSpecialLocation(File::userHomeDirectory).getFullPathName();
-    
-    File appDir = File(userHome+"/.RadioBlast");
-    
-    if (!appDir.exists()) {
-        appDir.createDirectory();
-    }
-    
-    File configFile = File(userHome+"/.RadioBlast/state.xml");
-    
-    if (configFile.exists()) {
-        std::unique_ptr<XmlElement> xml = XmlDocument(configFile).getDocumentElement();
-
-        if (xml == nullptr)
-			return;
-
-        ValueTree v = ValueTree::fromXml(*xml.get());
-        
-        if (v.getNumChildren() > 0) {
-            String path = v.getChild(0).getProperty("lastDirectory");
-            File file = File(path);
-            model->setCurrentDir(file);
+        // Verzeichnis erstellen falls nicht vorhanden
+        if (!appDir.exists())
+        {
+            juce::Result result = appDir.createDirectory();
+            if (result.failed())
+            {
+                DBG("Failed to create app directory: " + result.getErrorMessage());
+                return;
+            }
         }
-        xml = nullptr;
+
+        File configFile = File(userHome + "/.RadioBlast/state_right.xml");
+
+        if (left)
+            configFile = File(userHome + "/.RadioBlast/state_left.xml");
+
+
+        // Alte Datei löschen falls vorhanden
+        if (configFile.exists())
+        {
+            configFile.deleteFile();
+        }
+
+        // XML direkt erstellen statt ValueTree
+        std::unique_ptr<XmlElement> rootElement = std::make_unique<XmlElement>("SavedState");
+        std::unique_ptr<XmlElement> fileElement = std::make_unique<XmlElement>("File");
+
+        // Aktuelles Verzeichnis speichern
+        String currentDir = model->getCurrentDir();
+        fileElement->setAttribute("lastDirectory", currentDir);
+
+        // Child zu Root hinzufügen
+        rootElement->addChildElement(fileElement.release());
+
+        // In Datei schreiben
+        if (!rootElement->writeTo(configFile))
+        {
+            DBG("Failed to write state file");
+        }
+        else
+        {
+            DBG("State saved successfully to: " + configFile.getFullPathName());
+            DBG("Saved directory: " + currentDir);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        DBG("Exception in saveState: " + String(e.what()));
     }
 }
 
+void ExtendedFileBrowser::loadState()
+{
+    try
+    {
+        String userHome = File::getSpecialLocation(File::userHomeDirectory).getFullPathName();
+        File appDir = File(userHome + "/.RadioBlast");
+
+        // Verzeichnis erstellen falls nicht vorhanden
+        if (!appDir.exists())
+        {
+            appDir.createDirectory();
+        }
+
+        File configFile = File(userHome + "/.RadioBlast/state_right.xml");
+
+        if (left)
+            configFile = File(userHome + "/.RadioBlast/state_left.xml");
+
+        if (!configFile.exists()) {
+			DBG("No state file found, skipping load");
+            return;
+        }
+
+        // XML direkt parsen
+        XmlDocument doc(configFile);
+        std::unique_ptr<XmlElement> rootElement = doc.getDocumentElement();
+
+        if (rootElement == nullptr)
+        {
+            DBG("Failed to parse XML document");
+            return;
+        }
+
+        if (rootElement->getTagName() != "SavedState")
+        {
+            DBG("Invalid XML structure - expected SavedState root element");
+            return;
+        }
+
+        // File-Element finden
+        XmlElement* fileElement = rootElement->getChildByName("File");
+        if (fileElement != nullptr)
+        {
+            String lastDirectory = fileElement->getStringAttribute("lastDirectory");
+
+            if (lastDirectory.isNotEmpty())
+            {
+                File savedDir(lastDirectory);
+                if (savedDir.exists() && savedDir.isDirectory())
+                {
+                    model->setCurrentDir(savedDir);
+                    DBG("State loaded successfully - restored directory: " + lastDirectory);
+                }
+                else
+                {
+                    DBG("Saved directory no longer exists: " + lastDirectory);
+                    // Fallback auf Home-Verzeichnis
+                    File homeDir = File::getSpecialLocation(File::userHomeDirectory);
+                    model->setCurrentDir(homeDir);
+                }
+            }
+            else
+            {
+                DBG("No lastDirectory attribute found");
+            }
+        }
+        else
+        {
+            DBG("No File element found in XML");
+        }
+    }
+    catch (const std::exception& e)
+    {
+        DBG("Exception in loadState: " + String(e.what()));
+    }
+}
+
+// Zusätzliche Helper-Methode für besseres Error-Handling
+bool ExtendedFileBrowser::isValidDirectory(const File& dir) 
+{
+    return dir.exists() && dir.isDirectory() && dir.hasReadAccess();
+}
 void ExtendedFileBrowser::focusLost(FocusChangeType cause)
 {
     Component::focusLost(cause);

@@ -30,7 +30,7 @@ public:
     void update();
     juce::DirectoryContentsList* getDirectoryList();
     
-    juce::String& getCurrentDir() {
+    juce::String getCurrentDir() {
         return currentDirectory;
     }
     
@@ -70,6 +70,7 @@ public:
         onTrackLoadedCallback = callback;
     }
 
+    bool isValidDirectory(const juce::File& dir);
     void mouseDrag (const juce::MouseEvent& event) override;
     void mouseDoubleClick(const juce::MouseEvent& event) override;
     void mouseDown(const juce::MouseEvent& event) override;

@@ -144,11 +144,21 @@ MainComponent::MainComponent()
 
 	wave->onScrubbed = [this](int deck, double position) {
 		// Position des entsprechenden Samplers setzen
-
+		if (deck == 0)  {
+			leftFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+		}
+		else if (deck == 1) {
+			rightFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+		}
 	};
 
 	wave->onPositionClicked = [this](int deck, double position) {
-		// Sofort zur Position springen
+		if (deck == 0) {
+			leftFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+		}
+		else if (deck == 1) {
+			rightFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+		}
 	};
 
 	rightPlayList->onPlaylistFinished = [this]() {

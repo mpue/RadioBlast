@@ -66,7 +66,10 @@ public:
     
     float getPitch();
 
-    
+    void setCurrentPosition(long position) {
+		currentSample = position;
+	}
+
     void setPitch(float pitch);
     
     bool isPlaying() {

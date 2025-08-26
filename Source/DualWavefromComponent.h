@@ -194,6 +194,25 @@ public:
         return syncMode;
     }
 
+    // === BPM CONTROL ===
+    void setBPM(int deck, double bpm)
+    {
+        if (deck == 0)
+        {
+            deck1BPM = bpm;
+        }
+        else if (deck == 1)
+        {
+            deck2BPM = bpm;
+        }
+        repaint();
+    }
+
+    double getBPM(int deck) const
+    {
+        return (deck == 0) ? deck1BPM : deck2BPM;
+    }
+
     // === MOUSE HANDLING ===
     void mouseDown(const juce::MouseEvent& e) override
     {
@@ -365,6 +384,10 @@ private:
     // Sync features
     SyncMode syncMode;
 
+    // BPM values for display
+    double deck1BPM = 0.0;
+    double deck2BPM = 0.0;
+
     void drawWaveform(juce::Graphics& g, juce::Rectangle<int> area,
         const std::vector<float>& waveform, double position,
         double length, juce::Colour colour, int deckIndex)
@@ -502,6 +525,95 @@ private:
 
         juce::String controlInfo = "Ctrl+Wheel: Zoom | Wheel: Scroll | Right-click: Menu";
         g.drawText(controlInfo, getWidth() - 300, getHeight() - 20, 295, 15, juce::Justification::right);
+
+        // Position Display für beide Decks
+        drawPositionDisplay(g);
+    }
+
+    void drawPositionDisplay(juce::Graphics& g)
+    {
+        auto bounds = getLocalBounds();
+        int deckHeight = bounds.getHeight() / 2;
+
+        // Deck A Position Display
+        drawDeckPositionDisplay(g, juce::Rectangle<int>(0, 0, getWidth(), deckHeight),
+            deck1Position, deck1Length, juce::Colours::cyan, "A");
+
+        // Deck B Position Display  
+        drawDeckPositionDisplay(g, juce::Rectangle<int>(0, deckHeight, getWidth(), deckHeight),
+            deck2Position, deck2Length, juce::Colours::orange, "B");
+    }
+
+    void drawDeckPositionDisplay(juce::Graphics& g, juce::Rectangle<int> area,
+        double position, double length, juce::Colour colour,
+        const juce::String& deckName)
+    {
+        if (length <= 0.0) return;
+
+        // Position Display Box (rechts oben in jedem Deck-Bereich)
+        auto displayArea = juce::Rectangle<int>(area.getRight() - 150, area.getY() + 5, 145, 25);
+
+        // Background
+        g.setColour(juce::Colour(0xff1a1a1a).withAlpha(0.9f));
+        g.fillRoundedRectangle(displayArea.toFloat(), 3.0f);
+
+        // Border in Deck-Farbe
+        g.setColour(colour);
+        g.drawRoundedRectangle(displayArea.toFloat(), 3.0f, 1.0f);
+
+        // Position Text
+        g.setColour(juce::Colours::white);
+        g.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
+
+        juce::String positionText = formatTime(position) + " / " + formatTime(length);
+        g.drawText(positionText, displayArea.reduced(5), juce::Justification::centred);
+
+        // Deck Label (klein, links oben)
+        g.setColour(colour);
+        g.setFont(10.0f);
+        g.drawText(deckName, displayArea.getX() - 15, displayArea.getY() + 2, 12, 12, juce::Justification::centred);
+
+        // Progress Bar (unter dem Text)
+        drawProgressBar(g, displayArea, position, length, colour);
+
+        // BPM Display (falls verfügbar)
+        drawBPMDisplay(g, displayArea, deckName == "A" ? deck1BPM : deck2BPM, colour);
+    }
+
+    void drawProgressBar(juce::Graphics& g, juce::Rectangle<int> displayArea,
+        double position, double length, juce::Colour colour)
+    {
+        auto progressArea = juce::Rectangle<int>(displayArea.getX() + 5,
+            displayArea.getBottom() - 8,
+            displayArea.getWidth() - 10, 3);
+
+        // Background
+        g.setColour(juce::Colours::darkgrey);
+        g.fillRoundedRectangle(progressArea.toFloat(), 1.5f);
+
+        // Progress
+        if (length > 0.0)
+        {
+            double progress = juce::jlimit(0.0, 1.0, position / length);
+            int progressWidth = (int)(progress * progressArea.getWidth());
+
+            auto filledArea = progressArea.withWidth(progressWidth);
+            g.setColour(colour);
+            g.fillRoundedRectangle(filledArea.toFloat(), 1.5f);
+        }
+    }
+
+    void drawBPMDisplay(juce::Graphics& g, juce::Rectangle<int> displayArea,
+        double bpm, juce::Colour colour)
+    {
+        if (bpm <= 0.0) return;
+
+        auto bpmArea = juce::Rectangle<int>(displayArea.getX() - 45, displayArea.getY(), 40, 12);
+
+        g.setColour(colour.withAlpha(0.8f));
+        g.setFont(9.0f);
+        juce::String bpmText = juce::String(bpm, 1) + " BPM";
+        g.drawText(bpmText, bpmArea, juce::Justification::centred);
     }
 
     double pixelToTime(int pixel, double totalLength) const
