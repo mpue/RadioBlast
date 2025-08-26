@@ -8,6 +8,7 @@
 #pragma once
 #include <JuceHeader.h>
 #include "BPMAnalyzer.h"
+#include "LevelMeterComponent.h"
 //==============================================================================
 /*
 */
@@ -114,24 +115,24 @@ public:
         crossfaderLearnButton->onClick = [this]() { startMidiLearn(MidiTarget::Crossfader); };
 
         // BPM Display und Controls
-        leftBPMLabel = std::make_unique<juce::Label>("", "120.0 BPM");
-        rightBPMLabel = std::make_unique<juce::Label>("", "120.0 BPM");
+        leftBPMLabel = std::make_unique<juce::Label>("120.0 BPM");
+        rightBPMLabel = std::make_unique<juce::Label>("120.0 BPM");
         leftBPMLabel->setJustificationType(juce::Justification::centred);
         rightBPMLabel->setJustificationType(juce::Justification::centred);
         leftBPMLabel->setFont(12.0f);
         rightBPMLabel->setFont(12.0f);
-        leftBPMLabel->setColour(juce::Label::backgroundColourId, juce::Colours::black);
-        rightBPMLabel->setColour(juce::Label::backgroundColourId, juce::Colours::black);
+        // leftBPMLabel->setColour(juce::Label::backgroundColourId, juce::Colours::black);
+        // rightBPMLabel->setColour(juce::Label::backgroundColourId, juce::Colours::black);
         leftBPMLabel->setColour(juce::Label::textColourId, juce::Colours::lime);
         rightBPMLabel->setColour(juce::Label::textColourId, juce::Colours::lime);
         addAndMakeVisible(leftBPMLabel.get());
         addAndMakeVisible(rightBPMLabel.get());
 
         // Pitch/Tempo Slider (±8% wie bei echten DJ Mixern)
-        leftPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearVertical, juce::Slider::NoTextBox);
-        rightPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearVertical, juce::Slider::NoTextBox);
-        leftPitchSlider->setRange(-0.08, 0.08, 0.001); // ±8%
-        rightPitchSlider->setRange(-0.08, 0.08, 0.001);
+        leftPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
+        rightPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
+        leftPitchSlider->setRange(-1.0, 1.0, 0.01); // ±8%
+        rightPitchSlider->setRange(-1.0, 1.0, 0.01);
         leftPitchSlider->setValue(0.0); // Center
         rightPitchSlider->setValue(0.0);
         leftPitchSlider->setSkewFactor(1.0);
@@ -165,12 +166,47 @@ public:
         leftBPMAnalyzer = std::make_unique<BPMAnalyzer>();
         rightBPMAnalyzer = std::make_unique<BPMAnalyzer>();
 
+        addLevelMetersToMixerComponent();
+
         // Reset MIDI mappings
         resetMidiMappings();
     }
 
     ~MixerComponent() override
     {
+    }
+
+
+    // Add these to your MixerComponent class (in the constructor):
+    void addLevelMetersToMixerComponent()
+    {
+        // Level meters for both channels
+        leftLevelMeter = std::make_unique<LevelMeter>();
+        rightLevelMeter = std::make_unique<LevelMeter>();
+        masterLevelMeterL = std::make_unique<LevelMeter>();
+        masterLevelMeterR = std::make_unique<LevelMeter>();
+
+        addAndMakeVisible(leftLevelMeter.get());
+        addAndMakeVisible(rightLevelMeter.get());
+        addAndMakeVisible(masterLevelMeterL.get());
+        addAndMakeVisible(masterLevelMeterR.get());
+
+        // Level meter labels
+        leftLevelLabel = std::make_unique<juce::Label>("", "L");
+        rightLevelLabel = std::make_unique<juce::Label>("", "R");
+        masterLevelLabel = std::make_unique<juce::Label>("", "MASTER");
+
+        leftLevelLabel->setJustificationType(juce::Justification::centred);
+        rightLevelLabel->setJustificationType(juce::Justification::centred);
+        masterLevelLabel->setJustificationType(juce::Justification::centred);
+
+        leftLevelLabel->setFont(10.0f);
+        rightLevelLabel->setFont(10.0f);
+        masterLevelLabel->setFont(12.0f);
+
+        addAndMakeVisible(leftLevelLabel.get());
+        addAndMakeVisible(rightLevelLabel.get());
+        addAndMakeVisible(masterLevelLabel.get());
     }
 
     void paint(juce::Graphics& g) override
@@ -225,223 +261,247 @@ public:
         }
     }
 
+    // Ersetze die komplette resized() Methode in deiner MixerComponent.h mit dieser Version:
     void resized() override
     {
         auto area = getLocalBounds();
-        if (area.isEmpty()) return; // Safety check
+        if (area.isEmpty()) return;
 
-        area = area.reduced(10); // 10px Rand rundherum
-        if (area.isEmpty()) return; // Safety check nach reduce
+        area = area.reduced(10); // Außenrand
+        if (area.isEmpty()) return;
 
-        // === DECK SECTIONS ===
-        int deckWidth = juce::jmax(50, (area.getWidth() - 30) / 2); // Mindestbreite 50px
+        // === LAYOUT BEREICHE DEFINIEREN ===
+        int crossfaderHeight = 120;
+        int centerWidth = 60; // Breiter für Master-Meter
+        int deckWidth = (area.getWidth() - centerWidth - 20) / 2; // 20px Abstände
 
-        // Left Deck Area
-        auto leftArea = area.withWidth(deckWidth);
-        auto rightArea = area.withX(area.getX() + deckWidth + 30).withWidth(deckWidth);
+        // Bereiche aufteilen
+        auto leftDeckArea = area.withWidth(deckWidth);
+        auto centerArea = juce::Rectangle<int>(leftDeckArea.getRight() + 10, area.getY(),
+            centerWidth, area.getHeight() - crossfaderHeight);
+        auto rightDeckArea = juce::Rectangle<int>(centerArea.getRight() + 10, area.getY(),
+            deckWidth, area.getHeight() - crossfaderHeight);
+        auto crossfaderArea = area.removeFromBottom(crossfaderHeight).reduced(20, 10);
 
-        // === LEFT DECK LAYOUT ===
-        if (!leftArea.isEmpty())
+        // === LINKES DECK LAYOUT ===
+        layoutSingleDeck(leftDeckArea, true);
+
+        // === RECHTES DECK LAYOUT ===
+        layoutSingleDeck(rightDeckArea, false);
+
+        // === MASTER PEGELANZEIGEN (MITTE) ===
+        layoutMasterMeters(centerArea);
+
+        // === CROSSFADER BEREICH ===
+        layoutCrossfaderSection(crossfaderArea);
+    }
+
+
+    // Inline Layout-Methoden - alles in der Header-Datei
+
+    void layoutSingleDeck(juce::Rectangle<int> deckArea, bool isLeft)
+    {
+        if (deckArea.isEmpty()) return;
+
+        auto workingArea = deckArea.reduced(5); // Innenrand
+
+        // Komponenten für dieses Deck holen
+        auto slider = isLeft ? leftSlider.get() : rightSlider.get();
+        auto levelMeter = isLeft ? leftLevelMeter.get() : rightLevelMeter.get();
+        auto label = isLeft ? leftLabel.get() : rightLabel.get();
+        auto learnButton = isLeft ? leftLearnButton.get() : rightLearnButton.get();
+        auto ccLabel = isLeft ? leftCCLabel.get() : rightCCLabel.get();
+        auto outputLabel = isLeft ? leftOutputLabel.get() : rightOutputLabel.get();
+        auto outputCombo = isLeft ? leftOutputCombo.get() : rightOutputCombo.get();
+        auto syncButton = isLeft ? leftSyncButton.get() : rightSyncButton.get();
+        auto pitchSlider = isLeft ? leftPitchSlider.get() : rightPitchSlider.get();
+        auto pitchLabel = isLeft ? leftPitchLabel.get() : rightPitchLabel.get();
+        auto levelLabel = isLeft ? leftLevelLabel.get() : rightLevelLabel.get();
+
+        // === DECK LABEL (OBEN) ===
+        if (label && workingArea.getHeight() >= 25)
         {
-            auto leftDeckArea = leftArea;
-
-            // Deck Label
-            if (leftDeckArea.getHeight() >= 25)
-            {
-                auto leftLabelArea = leftDeckArea.removeFromTop(25);
-                if (leftLabel)
-                    leftLabel->setBounds(leftLabelArea);
-            }
-
-            if (leftDeckArea.getHeight() >= 5)
-                leftDeckArea.removeFromTop(5); // Spacer
-
-            // Volume Slider (Hauptteil)
-            if (leftDeckArea.getHeight() >= 250)
-            {
-                auto leftSliderArea = leftDeckArea.removeFromTop(250);
-                if (leftSlider)
-                    leftSlider->setBounds(leftSliderArea.reduced(juce::jmin(20, leftSliderArea.getWidth() / 4), 0));
-            }
-
-            if (leftDeckArea.getHeight() >= 10)
-                leftDeckArea.removeFromTop(10); // Spacer
-
-            // MIDI Learn Section
-            if (leftDeckArea.getHeight() >= 25)
-            {
-                auto leftMidiArea = leftDeckArea.removeFromTop(25);
-				if (leftLearnButton)
-                    leftLearnButton->setBounds(leftMidiArea);
-            }
-
-            if (leftDeckArea.getHeight() >= 5)
-                leftDeckArea.removeFromTop(5); // Spacer
-
-            // CC Label
-            if (leftDeckArea.getHeight() >= 20)
-            {
-                auto leftCCArea = leftDeckArea.removeFromTop(20);
-				if (leftCCLabel)
-                    leftCCLabel->setBounds(leftCCArea);
-            }
-
-            if (leftDeckArea.getHeight() >= 10)
-                leftDeckArea.removeFromTop(10); // Spacer
-
-            // Output Section
-            if (leftDeckArea.getHeight() >= 20)
-            {
-                auto leftOutputLabelArea = leftDeckArea.removeFromTop(20);
-				if (leftOutputLabel)
-                    leftOutputLabel->setBounds(leftOutputLabelArea);
-            }
-
-            if (leftDeckArea.getHeight() >= 5)
-                leftDeckArea.removeFromTop(5); // Spacer
-
-            if (leftDeckArea.getHeight() >= 25)
-            {
-                auto leftOutputComboArea = leftDeckArea.removeFromTop(25);
-				if (leftOutputCombo)
-                    leftOutputCombo->setBounds(leftOutputComboArea);
-            }
-
-            if (leftDeckArea.getHeight() >= 5)
-                leftDeckArea.removeFromTop(25); // Spacer
-
-            if (leftSyncButton) {
-                leftSyncButton->setBounds(leftDeckArea);
-				leftSyncButton->setSize(leftDeckArea.getWidth(), 30);
-            }
+            auto labelArea = workingArea.removeFromTop(25);
+            label->setBounds(labelArea);
+            workingArea.removeFromTop(5); // Spacer
         }
 
-        // === RIGHT DECK LAYOUT ===
-        if (!rightArea.isEmpty())
+        // === HAUPTBEREICH: VOLUME SLIDER + PEGELANZEIGE NEBENEINANDER ===
+        if (workingArea.getHeight() >= 200)
         {
-            auto rightDeckArea = rightArea;
+            auto mainControlArea = workingArea.removeFromTop(200);
 
-            // Deck Label
-            if (rightDeckArea.getHeight() >= 25)
+            // Volume Slider nimmt den Hauptteil ein
+            int sliderWidth = mainControlArea.getWidth() - 30; // Platz für Pegelanzeige
+            if (slider)
             {
-                auto rightLabelArea = rightDeckArea.removeFromTop(25);
-				if (rightLabel)
-                    rightLabel->setBounds(rightLabelArea);
+                auto sliderArea = mainControlArea.withWidth(sliderWidth).reduced(5, 0);
+                slider->setBounds(sliderArea);
             }
 
-            if (rightDeckArea.getHeight() >= 5)
-                rightDeckArea.removeFromTop(5); // Spacer
-
-            // Volume Slider (Hauptteil)
-            if (rightDeckArea.getHeight() >= 250)
+            // Pegelanzeige rechts neben Slider - DEUTLICH SICHTBAR
+            if (levelMeter)
             {
-                auto rightSliderArea = rightDeckArea.removeFromTop(250);
-				if (rightSlider)
-                    rightSlider->setBounds(rightSliderArea.reduced(juce::jmin(20, rightSliderArea.getWidth() / 4), 0));
+                auto meterArea = juce::Rectangle<int>(mainControlArea.getX() + sliderWidth + 2,
+                    mainControlArea.getY(),
+                    25, mainControlArea.getHeight() - 20);
+                levelMeter->setBounds(meterArea);
+
+                // Level Label unter Pegelanzeige
+                if (levelLabel)
+                {
+                    auto levelLabelArea = juce::Rectangle<int>(meterArea.getX() - 2,
+                        meterArea.getBottom() + 2,
+                        29, 15);
+                    levelLabel->setBounds(levelLabelArea);
+                    levelLabel->setText("LEV", juce::dontSendNotification); // Kürzer für bessere Sichtbarkeit
+                }
             }
 
-            if (rightDeckArea.getHeight() >= 10)
-                rightDeckArea.removeFromTop(10); // Spacer
-
-            // MIDI Learn Section
-            if (rightDeckArea.getHeight() >= 25)
-            {
-                auto rightMidiArea = rightDeckArea.removeFromTop(25);
-				if (rightLearnButton)
-                    rightLearnButton->setBounds(rightMidiArea);
-            }
-
-            if (rightDeckArea.getHeight() >= 5)
-                rightDeckArea.removeFromTop(5); // Spacer
-
-            // CC Label
-            if (rightDeckArea.getHeight() >= 20)
-            {
-                auto rightCCArea = rightDeckArea.removeFromTop(20);
-                if (rightCCLabel)
-                    rightCCLabel->setBounds(rightCCArea);
-            }
-
-            if (rightDeckArea.getHeight() >= 10)
-                rightDeckArea.removeFromTop(10); // Spacer
-
-            // Output Section
-            if (rightDeckArea.getHeight() >= 20)
-            {
-                auto rightOutputLabelArea = rightDeckArea.removeFromTop(20);
-				if (rightOutputLabel)
-                    rightOutputLabel->setBounds(rightOutputLabelArea);
-            }
-
-            if (rightDeckArea.getHeight() >= 5)
-                rightDeckArea.removeFromTop(5); // Spacer
-
-            if (rightDeckArea.getHeight() >= 25)
-            {
-                auto rightOutputComboArea = rightDeckArea.removeFromTop(25);
-				if (rightOutputCombo)
-                    rightOutputCombo->setBounds(rightOutputComboArea);
-            }
-
-            if (rightDeckArea.getHeight() >= 5)
-                rightDeckArea.removeFromTop(25); // Spacer
-
-            if (rightSyncButton) {
-                rightSyncButton->setBounds(rightDeckArea);
-				rightSyncButton->setSize(rightDeckArea.getWidth(), 30);
-            }
-
+            workingArea.removeFromTop(10); // Spacer
         }
 
-
-
-        // === CROSSFADER SECTION (unten, über beide Decks) ===
-        auto totalBounds = getLocalBounds();
-        if (totalBounds.getHeight() >= 120)
+        // === MIDI LEARN BEREICH ===
+        if (learnButton && workingArea.getHeight() >= 25)
         {
-            auto crossfaderMainArea = totalBounds.removeFromBottom(120);
-            crossfaderMainArea = crossfaderMainArea.reduced(20, 10); // Ränder
+            auto midiArea = workingArea.removeFromTop(25);
+            learnButton->setBounds(midiArea);
+            workingArea.removeFromTop(3); // Kleiner Spacer
+        }
 
-            if (!crossfaderMainArea.isEmpty())
+        if (ccLabel && workingArea.getHeight() >= 18)
+        {
+            auto ccArea = workingArea.removeFromTop(18);
+            ccLabel->setBounds(ccArea);
+            workingArea.removeFromTop(8); // Spacer
+        }
+
+        // === OUTPUT ROUTING ===
+        if (outputLabel && workingArea.getHeight() >= 18)
+        {
+            auto outputLabelArea = workingArea.removeFromTop(18);
+            outputLabel->setBounds(outputLabelArea);
+            workingArea.removeFromTop(3); // Spacer
+        }
+
+        if (outputCombo && workingArea.getHeight() >= 25)
+        {
+            auto outputComboArea = workingArea.removeFromTop(25);
+            outputCombo->setBounds(outputComboArea);
+            workingArea.removeFromTop(10); // Spacer
+        }
+
+        // === SYNC BUTTON ===
+        if (syncButton && workingArea.getHeight() >= 30)
+        {
+            auto syncArea = workingArea.removeFromTop(30);
+            syncButton->setBounds(syncArea);
+            workingArea.removeFromTop(5); // Kleiner Spacer
+        }
+
+        // === PITCH SLIDER (DIREKT UNTER SYNC) ===
+        if (pitchSlider && workingArea.getHeight() >= 25)
+        {
+            auto pitchArea = workingArea.removeFromTop(25);
+            pitchSlider->setBounds(pitchArea);
+            workingArea.removeFromTop(3); // Spacer
+        }
+
+        // === PITCH LABEL ===
+        if (pitchLabel && workingArea.getHeight() >= 15)
+        {
+            auto pitchLabelArea = workingArea.removeFromTop(15);
+            pitchLabel->setBounds(pitchLabelArea);
+        }
+    }
+
+    void layoutMasterMeters(juce::Rectangle<int> centerArea)
+    {
+        if (centerArea.isEmpty()) return;
+
+        auto workingArea = centerArea.reduced(5);
+
+        // Master Label oben
+        if (masterLevelLabel && workingArea.getHeight() >= 20)
+        {
+            auto labelArea = workingArea.removeFromTop(20);
+            masterLevelLabel->setBounds(labelArea);
+            workingArea.removeFromTop(10); // Spacer
+        }
+
+        // Master Pegelanzeigen - nebeneinander, größer und prominenter
+        if (masterLevelMeterL && masterLevelMeterR && workingArea.getHeight() >= 150)
+        {
+            auto meterArea = workingArea.removeFromTop(150);
+
+            int meterWidth = 20;
+            int spacing = (meterArea.getWidth() - (2 * meterWidth)) / 2;
+
+            auto leftMeterBounds = juce::Rectangle<int>(meterArea.getX(), meterArea.getY(),
+                meterWidth, meterArea.getHeight());
+            auto rightMeterBounds = juce::Rectangle<int>(meterArea.getX() + meterWidth + spacing,
+                meterArea.getY(),
+                meterWidth, meterArea.getHeight());
+
+            masterLevelMeterL->setBounds(leftMeterBounds);
+            masterLevelMeterR->setBounds(rightMeterBounds);
+
+            workingArea.removeFromTop(5); // Spacer
+        }
+
+        // L/R Labels unter den Metern - create if needed
+        if (workingArea.getHeight() >= 15)
+        {
+            auto labelArea = workingArea.removeFromTop(15);
+
+            // Create L/R label if it doesn't exist
+            if (!masterLRLabel)
             {
-                // Crossfader Label
-                if (crossfaderMainArea.getHeight() >= 25)
-                {
-                    auto crossfaderLabelArea = crossfaderMainArea.removeFromTop(25);
-					if (crossfaderLabel)
-                        crossfaderLabel->setBounds(crossfaderLabelArea);
-                }
+                masterLRLabel = std::make_unique<juce::Label>("", "L    R");
+                masterLRLabel->setJustificationType(juce::Justification::centred);
+                masterLRLabel->setFont(10.0f);
+                addAndMakeVisible(masterLRLabel.get());
+            }
+            masterLRLabel->setBounds(labelArea);
+        }
+    }
 
-                if (crossfaderMainArea.getHeight() >= 5)
-                    crossfaderMainArea.removeFromTop(5); // Spacer
+    void layoutCrossfaderSection(juce::Rectangle<int> crossfaderArea)
+    {
+        if (crossfaderArea.isEmpty()) return;
 
-                // Crossfader Slider
-                if (crossfaderMainArea.getHeight() >= 40)
-                {
-                    auto crossfaderSliderArea = crossfaderMainArea.removeFromTop(40);
-					if (crossfader)
-                        crossfader->setBounds(crossfaderSliderArea);
-                }
+        // Crossfader Label
+        if (crossfaderLabel && crossfaderArea.getHeight() >= 20)
+        {
+            auto labelArea = crossfaderArea.removeFromTop(20);
+            crossfaderLabel->setBounds(labelArea);
+            crossfaderArea.removeFromTop(5); // Spacer
+        }
 
-                if (crossfaderMainArea.getHeight() >= 5)
-                    crossfaderMainArea.removeFromTop(5); // Spacer
+        // Crossfader Slider
+        if (crossfader && crossfaderArea.getHeight() >= 35)
+        {
+            auto sliderArea = crossfaderArea.removeFromTop(35);
+            crossfader->setBounds(sliderArea);
+            crossfaderArea.removeFromTop(5); // Spacer
+        }
 
-                // Crossfader MIDI Controls (horizontal layout)
-                if (crossfaderMainArea.getHeight() >= 25 && crossfaderMainArea.getWidth() >= 110)
-                {
-                    auto crossfaderControlsArea = crossfaderMainArea.removeFromTop(25);
-                    auto crossfaderLearnArea = crossfaderControlsArea.removeFromLeft(100);
+        // Crossfader Controls (horizontal)
+        if (crossfaderLearnButton && crossfaderCCLabel && crossfaderArea.getHeight() >= 25)
+        {
+            auto controlsArea = crossfaderArea.removeFromTop(25);
 
-					if (crossfaderLearnButton)
-                        crossfaderLearnButton->setBounds(crossfaderLearnArea);
+            // Learn Button links
+            auto learnArea = controlsArea.removeFromLeft(120);
+            crossfaderLearnButton->setBounds(learnArea);
 
-                    if (crossfaderControlsArea.getWidth() >= 90)
-                    {
-                        crossfaderControlsArea.removeFromLeft(10); // Spacer zwischen Button und Label
-						if (crossfaderCCLabel)
-                            crossfaderCCLabel->setBounds(crossfaderControlsArea.removeFromLeft(80));
-                    }
-                }
+            // Spacer
+            controlsArea.removeFromLeft(10);
+
+            // CC Label rechts
+            if (controlsArea.getWidth() >= 60)
+            {
+                crossfaderCCLabel->setBounds(controlsArea.removeFromLeft(60));
             }
         }
     }
@@ -586,12 +646,12 @@ public:
         if (isLeftDeck && leftBPMAnalyzer->isAnalysisComplete())
         {
             double bpm = leftBPMAnalyzer->getBPM();
-            leftBPMLabel->setText(juce::String(bpm, 1) + " BPM", juce::dontSendNotification);
+            leftSyncButton->setButtonText(juce::String(bpm, 1) + " BPM");
         }
         else if (!isLeftDeck && rightBPMAnalyzer->isAnalysisComplete())
         {
             double bpm = rightBPMAnalyzer->getBPM();
-            rightBPMLabel->setText(juce::String(bpm, 1) + " BPM", juce::dontSendNotification);
+            rightSyncButton->setButtonText(juce::String(bpm, 1) + " BPM");
         }
     }
 
@@ -638,6 +698,48 @@ public:
     double getLeftPitch() const { return 1.0 + leftPitchSlider->getValue(); }
     double getRightPitch() const { return 1.0 + rightPitchSlider->getValue(); }
     
+    float getLeftChannelGain() {
+        return (float)leftSlider->getValue();
+    }
+
+    float getRightChannelGain() {
+        return (float)rightSlider->getValue();
+    }
+
+    // Get gain for master output (with crossfader influence)
+    float getLeftMasterGain() {
+        float baseGain = (float)leftSlider->getValue();
+        float crossfaderValue = (float)crossfader->getValue();
+
+        float crossfaderGain = 1.0f;
+        if (crossfaderValue > 0.0f) {
+            crossfaderGain = 1.0f - crossfaderValue;
+        }
+
+        return baseGain * crossfaderGain;
+    }
+
+    float getRightMasterGain() {
+        float baseGain = (float)rightSlider->getValue();
+        float crossfaderValue = (float)crossfader->getValue();
+
+        float crossfaderGain = 1.0f;
+        if (crossfaderValue < 0.0f) {
+            crossfaderGain = 1.0f + crossfaderValue;
+        }
+
+        return baseGain * crossfaderGain;
+    }
+
+    // Get gain for cue output (no crossfader influence)
+    float getLeftCueGain() {
+        return (float)leftSlider->getValue();
+    }
+
+    float getRightCueGain() {
+        return (float)rightSlider->getValue();
+    }
+
     // Audio-Funktionen mit Output Routing
     float getLeftGain() {
         float baseGain = (float)leftSlider->getValue();
@@ -740,6 +842,35 @@ public:
         crossfaderCCLabel->setText(cc >= 0 ? "CC: " + juce::String(cc) : "CC: -", juce::dontSendNotification);
     }
 
+    void updateLeftChannelLevel(float leftLevel, float rightLevel)
+    {
+        if (leftLevelMeter)
+        {
+            // Use RMS for more stable meter display
+            float rmsLevel = std::sqrt((leftLevel * leftLevel + rightLevel * rightLevel) * 0.5f);
+            leftLevelMeter->setLevel(rmsLevel);
+        }
+    }
+
+    void updateRightChannelLevel(float leftLevel, float rightLevel)
+    {
+        if (rightLevelMeter)
+        {
+            float rmsLevel = std::sqrt((leftLevel * leftLevel + rightLevel * rightLevel) * 0.5f);
+            rightLevelMeter->setLevel(rmsLevel);
+        }
+    }
+
+    void updateMasterLevels(float masterLeft, float masterRight)
+    {
+        if (masterLevelMeterL)
+            masterLevelMeterL->setLevel(std::abs(masterLeft));
+        if (masterLevelMeterR)
+            masterLevelMeterR->setLevel(std::abs(masterRight));
+    }
+
+   
+
 private:
     // GUI Components
     std::unique_ptr<juce::Slider> leftSlider = nullptr;
@@ -785,6 +916,17 @@ private:
     int leftVolumeCC = -1;
     int rightVolumeCC = -1;
     int crossfaderCC = -1;
+
+    std::unique_ptr<LevelMeter> leftLevelMeter = nullptr;
+    std::unique_ptr<LevelMeter> rightLevelMeter = nullptr;
+    std::unique_ptr<LevelMeter> masterLevelMeterL = nullptr;
+    std::unique_ptr<LevelMeter> masterLevelMeterR = nullptr;
+
+    std::unique_ptr<juce::Label> leftLevelLabel = nullptr;
+    std::unique_ptr<juce::Label> rightLevelLabel = nullptr;
+    std::unique_ptr<juce::Label> masterLevelLabel = nullptr;
+
+    std::unique_ptr<juce::Label> masterLRLabel = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixerComponent)
 };

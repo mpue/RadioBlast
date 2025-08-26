@@ -5,6 +5,9 @@ MainComponent::MainComponent()
     : TimeSliceThread("PropertyWatcher"),
     resizerBar(&stretchableManager, 1, true)
 {
+    djLookAndFeel = std::make_unique<DJLookAndFeel>();
+    setLookAndFeel(djLookAndFeel.get());
+
     setSize(1280, 800);
 
     menuBar = std::make_unique<juce::MenuBarComponent>(this);
@@ -49,10 +52,22 @@ MainComponent::MainComponent()
 
     // Add visible components
     advancedDock.addComponentToNewColumn(leftFileBrowser.get(),0,0);
-    advancedDock.addComponentToNewColumn(mixer.get(),0,1, 100);
+    advancedDock.addComponentToNewColumn(mixer.get(),0,1, 200);
     advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 2);
     advancedDock.addComponentToNewRow(leftPlayList.get(), 1);
     advancedDock.addComponentToNewColumn(rightPlayList.get(), 1,1);
+
+    juce::PropertiesFile::Options options;
+    options.applicationName = "RadioBlast";
+    options.filenameSuffix = ".settings";
+    options.osxLibrarySubFolder = "Application Support";
+    appProperties.setStorageParameters(options);
+
+    // AudioDeviceManager initialisieren
+    audioDeviceManager.initialise(2, 2, nullptr, true);
+
+    // Gespeicherte Audio-Einstellungen laden
+    createConfig();
 
     // Audio permissions
     if (juce::RuntimePermissions::isRequired(juce::RuntimePermissions::recordAudio)
@@ -88,7 +103,8 @@ MainComponent::MainComponent()
 }
 
 MainComponent::~MainComponent()
-{
+{	
+    setLookAndFeel(nullptr);
     cleanupMidiInputs();
     shutdownAudio();
 }
@@ -132,11 +148,7 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
         cleanupMidiInputs();
         setupMidiInputs();
     }
-    else
-    {
-        // Bestehende ChangeListener Logik für File Browser etc.
-        // ... dein bestehender changeListenerCallback Code ...
-    }
+
 }
 
 juce::StringArray MainComponent::getMenuBarNames()
@@ -190,62 +202,70 @@ void MainComponent::menuItemSelected(int menuItemID, int topLevelMenuIndex)
     }
 }
 
-void MainComponent::showAudioSettings()
-{
-    if (settingsWindow != nullptr)
-    {
-        settingsWindow->toFront(true);        
+void MainComponent::createConfig() {
+    String userHome = File::getSpecialLocation(File::userHomeDirectory).getFullPathName();
+
+    File appDir = File(userHome + "/.RadioBlast");
+
+    if (!appDir.exists()) {
+        appDir.createDirectory();
     }
 
-    // Audio Device Selector erstellen
-    audioSettingsComponent = std::make_unique<juce::AudioDeviceSelectorComponent>(
-        deviceManager,
-        0, 2,    // Minimum/Maximum Input Channels
-        2, 8,    // Minimum/Maximum Output Channels
-        true,   // Show MIDI Input Options
-        true,    // Show MIDI Output Options  
-        true,   // Show Channels as Stereo Pairs
-        false    // Hide Advanced Options
-    );
+    File configFile = File(userHome + "/.RadioBlast/config.xml");
 
-    // Custom DialogWindow Klasse für Close-Handling
-    class SettingsDialogWindow : public juce::DialogWindow
-    {
-    public:
-        SettingsDialogWindow(const juce::String& name, juce::Colour backgroundColour, bool escapeKeyTriggersCloseButton, bool addToDesktop, MainComponent* parent)
-            : DialogWindow(name, backgroundColour, escapeKeyTriggersCloseButton, addToDesktop), parentComponent(parent)
-        {
-            setSize(800, 600);
-        }
-
-        void closeButtonPressed() override
-        {
-            if (parentComponent)
-                parentComponent->closeSettingsWindow();
-        }
-
-    private:
-        MainComponent* parentComponent;
-    };
-
-    if (settingsWindow == nullptr) {
-        // Dialog Window erstellen
-        settingsWindow = std::make_unique<SettingsDialogWindow>("Audio Settings",
-            juce::Colours::darkgrey,
-            true,
-            true,
-            this);
-
+    if (configFile.exists()) {
+        std::unique_ptr<XmlElement> xml = XmlDocument(configFile).getDocumentElement();
+        deviceManager.initialise(2, 2, xml.get(), true);
     }
-		
-    settingsWindow->setContentOwned(audioSettingsComponent.release(), true);
-	settingsWindow->setSize(600, 400);
-    settingsWindow->setResizable(true, false);
-    settingsWindow->setUsingNativeTitleBar(false);
-    settingsWindow->centreAroundComponent(this, settingsWindow->getWidth(), settingsWindow->getHeight());
-    settingsWindow->setVisible(true);
 }
 
+void MainComponent::showAudioSettings()
+{
+    AudioDeviceSelectorComponent* selector = new AudioDeviceSelectorComponent(deviceManager, 2, 16, 2, 16, true, true, true, false);
+    DialogWindow::LaunchOptions launchOptions;
+
+    launchOptions.dialogTitle = ("Audio Settings");
+    launchOptions.escapeKeyTriggersCloseButton = true;
+    launchOptions.resizable = false;
+    launchOptions.useNativeTitleBar = false;
+    launchOptions.useBottomRightCornerResizer = true;
+    launchOptions.componentToCentreAround = getParentComponent();
+    launchOptions.content.setOwned(selector);
+    launchOptions.content->setSize(600, 580);
+    launchOptions.dialogBackgroundColour = Colour(0xff222222);
+
+    DialogWindow* window = launchOptions.launchAsync();
+
+    std::function<void(int)> lambda =
+        [this, selector](int result) {
+        AudioDeviceManager::AudioDeviceSetup setup;
+
+        deviceManager.getAudioDeviceSetup(setup);
+        deviceManager.restartLastAudioDevice();
+
+        std::unique_ptr<XmlElement> config = deviceManager.createStateXml();
+
+        String userHome = File::getSpecialLocation(File::userHomeDirectory).getFullPathName();
+
+        File appDir = File(userHome + "/.RadioBlast");
+
+        if (!appDir.exists()) {
+            appDir.createDirectory();
+        }
+
+        File configFile = File(userHome + "/.RadioBlast/config.xml");
+
+        if (config != nullptr) {
+            config->writeToFile(configFile, "");
+            config = nullptr;
+        }
+       
+        delete selector;
+        };
+
+    ModalComponentManager::Callback* callback = ModalCallbackFunction::create(lambda);
+    ModalComponentManager::getInstance()->attachCallback(window, callback);
+}
 
 void MainComponent::closeSettingsWindow()
 {
@@ -284,72 +304,8 @@ void MainComponent::handleIncomingMidiMessage(MidiInput* source, const MidiMessa
 }
 
 // MainComponent.cpp - erweiterte copyBufferFromSampler Methode
-void MainComponent::copyBufferFromSampler(const juce::AudioSourceChannelInfo& bufferToFill, Sampler* sampler, bool& retFlag, float gain, double pitchRatio)
-{
-    retFlag = true;
-    auto* writableBuffer = const_cast<juce::AudioBuffer<float>*>(bufferToFill.buffer);
-    if (!writableBuffer) return;
+// Replace the getNextAudioBlock method in MainComponent.cpp with this updated version:
 
-    float** outputData = const_cast<float**>(writableBuffer->getArrayOfWritePointers());
-    const int outNumChans = writableBuffer->getNumChannels();
-    if (!outputData || outNumChans == 0) return;
-
-    if (sampler && sampler->isPlaying()) {
-        // Pitch-Shifting durch Sample-Rate Manipulation
-        // Einfache Implementierung - für bessere Qualität würde man einen echten Pitch-Shifter nutzen
-
-        if (std::abs(pitchRatio - 1.0) < 0.001) {
-            // Kein Pitch-Shifting nötig
-            for (int j = 0; j < bufferToFill.numSamples; ++j) {
-                float sL = sampler->getOutput(0) * gain;
-                float sR = sampler->getOutput(1) * gain;
-                if (outNumChans > 0 && outputData[0]) outputData[0][j] += sL;
-                if (outNumChans > 1 && outputData[1]) outputData[1][j] += sR;
-                sampler->nextSample();
-            }
-        }
-        else {
-            // Pitch-Shifting durch Sample-Rate Änderung
-            static double leftPhase = 0.0;
-            static double rightPhase = 0.0;
-
-            for (int j = 0; j < bufferToFill.numSamples; ++j) {
-                // Linear interpolation für Pitch-Shifting
-                double intPart;
-                double fracPart = std::modf(leftPhase, &intPart);
-
-                // Aktuelle und nächste Samples holen
-                float sL_curr = sampler->getOutput(0) * gain;
-                float sR_curr = sampler->getOutput(1) * gain;
-
-                sampler->nextSample();
-
-                float sL_next = sampler->getOutput(0) * gain;
-                float sR_next = sampler->getOutput(1) * gain;
-
-                // Linear interpolation
-                float sL = sL_curr + fracPart * (sL_next - sL_curr);
-                float sR = sR_curr + fracPart * (sR_next - sR_curr);
-
-                if (outNumChans > 0 && outputData[0]) outputData[0][j] += sL;
-                if (outNumChans > 1 && outputData[1]) outputData[1][j] += sR;
-
-                // Phase für nächstes Sample
-                leftPhase += pitchRatio;
-                rightPhase += pitchRatio;
-
-                // Phase-Wrap verhindern
-                if (leftPhase >= 2.0) {
-                    leftPhase -= 1.0;
-                }
-            }
-        }
-    }
-
-    retFlag = false;
-}
-
-// Erweiterte getNextAudioBlock mit Pitch-Shifting
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
 {
     bufferToFill.clearActiveBufferRegion();
@@ -358,7 +314,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
     Sampler* rightSampler = rightFileBrowser->getSampler();
 
     // Pitch-Werte von Mixer holen
-    double leftPitch = mixer->getLeftPitch();   // 1.0 = normal, 1.05 = +5%, 0.95 = -5%
+    double leftPitch = mixer->getLeftPitch();
     double rightPitch = mixer->getRightPitch();
 
     auto* writableBuffer = const_cast<juce::AudioBuffer<float>*>(bufferToFill.buffer);
@@ -374,59 +330,122 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
     std::vector<float> rightSamplerL(bufferToFill.numSamples, 0.0f);
     std::vector<float> rightSamplerR(bufferToFill.numSamples, 0.0f);
 
-    // Left Sampler mit Pitch-Shifting
+    // Level monitoring variables
+    float leftChannelSum = 0.0f;
+    float rightChannelSum = 0.0f;
+    float masterLeftSum = 0.0f;
+    float masterRightSum = 0.0f;
+
+    // Generate sampler outputs
     if (leftSampler && leftSampler->isPlaying()) {
         generateSamplerOutputWithPitch(leftSampler, leftSamplerL, leftSamplerR,
-            bufferToFill.numSamples, mixer->getLeftGain(), leftPitch);
+            bufferToFill.numSamples, mixer->getLeftChannelGain(), leftPitch);
     }
 
-    // Right Sampler mit Pitch-Shifting
     if (rightSampler && rightSampler->isPlaying()) {
         generateSamplerOutputWithPitch(rightSampler, rightSamplerL, rightSamplerR,
-            bufferToFill.numSamples, mixer->getRightGain(), rightPitch);
+            bufferToFill.numSamples, mixer->getRightChannelGain(), rightPitch);
     }
 
-    // Output Routing (wie gehabt)
+    // Output Routing with level monitoring
     for (int j = 0; j < bufferToFill.numSamples; ++j) {
-        // Left Deck Routing
+
+        // Calculate channel levels before routing (for deck meters)
+        float leftChannelLevel = std::sqrt(leftSamplerL[j] * leftSamplerL[j] + leftSamplerR[j] * leftSamplerR[j]);
+        float rightChannelLevel = std::sqrt(rightSamplerL[j] * rightSamplerL[j] + rightSamplerR[j] * rightSamplerR[j]);
+
+        leftChannelSum += leftChannelLevel * leftChannelLevel;
+        rightChannelSum += rightChannelLevel * rightChannelLevel;
+
+        // === LEFT DECK ROUTING ===
         auto leftDest = mixer->getLeftChannelDestination();
-        switch (leftDest) {
-        case MixerComponent::OutputDestination::CueLeft:
-        case MixerComponent::OutputDestination::CueRight:
+
+        if (mixer->isLeftChannelRoutedToMaster()) {
+            float masterGain = mixer->getLeftMasterGain() / mixer->getLeftChannelGain();
+
+            switch (leftDest) {
+            case MixerComponent::OutputDestination::MasterLeft:
+                if (outNumChans > 0) {
+                    float outputL = leftSamplerL[j] * masterGain;
+                    float outputR = leftSamplerR[j] * masterGain;
+                    outputData[0][j] += outputL;
+                    if (outNumChans > 1) outputData[1][j] += outputR;
+
+                    // Track master levels
+                    masterLeftSum += outputL * outputL;
+                    masterRightSum += outputR * outputR;
+                }
+                break;
+            case MixerComponent::OutputDestination::MasterRight:
+                if (outNumChans > 1) {
+                    float monoOutput = (leftSamplerL[j] + leftSamplerR[j]) * masterGain * 0.5f;
+                    outputData[1][j] += monoOutput;
+                    masterRightSum += monoOutput * monoOutput;
+                }
+                break;
+            }
+        }
+
+        if (mixer->isLeftChannelRoutedToCue()) {
             if (outNumChans > 2) outputData[2][j] += leftSamplerL[j];
             if (outNumChans > 3) outputData[3][j] += leftSamplerR[j];
-            break;
-        case MixerComponent::OutputDestination::Muted:
-            break;
-        default:
-            // Master Output Handling
-            if (mixer->getLeftOutputCombo()->getSelectedId() == 1) { // Master L+R
-                if (outNumChans > 0) outputData[0][j] += leftSamplerL[j];
-                if (outNumChans > 1) outputData[1][j] += leftSamplerR[j];
-            }
-            break;
         }
 
-        // Right Deck Routing
+        // === RIGHT DECK ROUTING ===
         auto rightDest = mixer->getRightChannelDestination();
-        switch (rightDest) {
-        case MixerComponent::OutputDestination::CueLeft:
-        case MixerComponent::OutputDestination::CueRight:
+
+        if (mixer->isRightChannelRoutedToMaster()) {
+            float masterGain = mixer->getRightMasterGain() / mixer->getRightChannelGain();
+
+            switch (rightDest) {
+            case MixerComponent::OutputDestination::MasterLeft:
+                if (outNumChans > 0) {
+                    float monoOutput = (rightSamplerL[j] + rightSamplerR[j]) * masterGain * 0.5f;
+                    outputData[0][j] += monoOutput;
+                    masterLeftSum += monoOutput * monoOutput;
+                }
+                break;
+            case MixerComponent::OutputDestination::MasterRight:
+                if (outNumChans > 0) {
+                    float outputL = rightSamplerL[j] * masterGain;
+                    float outputR = rightSamplerR[j] * masterGain;
+                    outputData[0][j] += outputL;
+                    if (outNumChans > 1) outputData[1][j] += outputR;
+
+                    // Track master levels
+                    masterLeftSum += outputL * outputL;
+                    masterRightSum += outputR * outputR;
+                }
+                break;
+            }
+        }
+
+        if (mixer->isRightChannelRoutedToCue()) {
             if (outNumChans > 2) outputData[2][j] += rightSamplerL[j];
             if (outNumChans > 3) outputData[3][j] += rightSamplerR[j];
-            break;
-        case MixerComponent::OutputDestination::Muted:
-            break;
-        default:
-            if (mixer->getRightOutputCombo()->getSelectedId() == 1) { // Master L+R
-                if (outNumChans > 0) outputData[0][j] += rightSamplerL[j];
-                if (outNumChans > 1) outputData[1][j] += rightSamplerR[j];
-            }
-            break;
         }
     }
-}
 
+    // Calculate RMS levels for meters
+    if (bufferToFill.numSamples > 0)
+    {
+        leftChannelRMS = std::sqrt(leftChannelSum / bufferToFill.numSamples);
+        rightChannelRMS = std::sqrt(rightChannelSum / bufferToFill.numSamples);
+        masterLeftRMS = std::sqrt(masterLeftSum / bufferToFill.numSamples);
+        masterRightRMS = std::sqrt(masterRightSum / bufferToFill.numSamples);
+
+        // Update level meters on message thread
+        juce::MessageManager::callAsync([this]()
+            {
+                if (mixer)
+                {
+                    mixer->updateLeftChannelLevel(leftChannelRMS, leftChannelRMS);
+                    mixer->updateRightChannelLevel(rightChannelRMS, rightChannelRMS);
+                    mixer->updateMasterLevels(masterLeftRMS, masterRightRMS);
+                }
+            });
+    }
+}
 // Hilfsfunktion für Pitch-Shifting
 void MainComponent::generateSamplerOutputWithPitch(Sampler* sampler,
     std::vector<float>& outputL,
@@ -434,33 +453,49 @@ void MainComponent::generateSamplerOutputWithPitch(Sampler* sampler,
     int numSamples, float gain, double pitch)
 {
     static double phase = 0.0;
+    static float prevSampleL = 0.0f;
+    static float prevSampleR = 0.0f;
+    static float currentSampleL = 0.0f;
+    static float currentSampleR = 0.0f;
+    static bool needNewSample = true;
 
     for (int i = 0; i < numSamples; ++i) {
         if (std::abs(pitch - 1.0) < 0.001) {
-            // Kein Pitch-Shifting
+            // Kein Pitch-Shifting - normaler Durchlauf
             outputL[i] = sampler->getOutput(0) * gain;
             outputR[i] = sampler->getOutput(1) * gain;
             sampler->nextSample();
         }
         else {
-            // Simple Pitch-Shifting durch Sample-Interpolation
-            double intPart;
-            double fracPart = std::modf(phase, &intPart);
+            // Pitch-Shifting mit korrekter Interpolation
 
-            float sL1 = sampler->getOutput(0) * gain;
-            float sR1 = sampler->getOutput(1) * gain;
+            // Neue Samples holen wenn nötig
+            while (phase >= 1.0) {
+                prevSampleL = currentSampleL;
+                prevSampleR = currentSampleR;
+                currentSampleL = sampler->getOutput(0);
+                currentSampleR = sampler->getOutput(1);
+                sampler->nextSample();
+                phase -= 1.0;
+                needNewSample = false;
+            }
 
-            sampler->nextSample();
+            // Beim ersten Mal oder nach Reset
+            if (needNewSample) {
+                currentSampleL = sampler->getOutput(0);
+                currentSampleR = sampler->getOutput(1);
+                prevSampleL = currentSampleL;
+                prevSampleR = currentSampleR;
+                needNewSample = false;
+            }
 
-            float sL2 = sampler->getOutput(0) * gain;
-            float sR2 = sampler->getOutput(1) * gain;
+            // Linear interpolation zwischen den Samples
+            float fracPart = static_cast<float>(phase);
+            outputL[i] = (prevSampleL + fracPart * (currentSampleL - prevSampleL)) * gain;
+            outputR[i] = (prevSampleR + fracPart * (currentSampleR - prevSampleR)) * gain;
 
-            // Linear interpolation
-            outputL[i] = sL1 + fracPart * (sL2 - sL1);
-            outputR[i] = sR1 + fracPart * (sR2 - sR1);
-
+            // Phase für nächstes Sample erhöhen
             phase += pitch;
-            if (phase >= 2.0) phase -= 1.0;
         }
     }
 }

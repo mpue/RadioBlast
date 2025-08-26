@@ -6,7 +6,7 @@
 #include "MixerComponent.h"
 #include "JDockableWindows.h"
 #include "JAdvancedDock.h"
-
+#include "DJLookAndFeel.h"
 //==============================================================================
 /*
     This component lives inside our window, and this is where you should put all
@@ -48,7 +48,7 @@ public:
     void setupMidiInputs();
     void cleanupMidiInputs();
     void changeListenerCallback(juce::ChangeBroadcaster* source) override;
-
+    void createConfig();
 
     void generateSamplerOutputWithPitch(Sampler* sampler, std::vector<float>& outputL,
         std::vector<float>& outputR, int numSamples,
@@ -105,6 +105,16 @@ private:
     WindowDockVertical dock{ dockManager };
     TabDock tabDock{ dockManager };
     JAdvancedDock advancedDock{ dockManager };
+
+    juce::AudioDeviceManager audioDeviceManager;
+    juce::ApplicationProperties appProperties;
+
+    std::unique_ptr<DJLookAndFeel> djLookAndFeel;
+
+    float leftChannelRMS = 0.0f;
+    float rightChannelRMS = 0.0f;
+    float masterLeftRMS = 0.0f;
+    float masterRightRMS = 0.0f;
 
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
