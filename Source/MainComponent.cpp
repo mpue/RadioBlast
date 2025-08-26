@@ -46,6 +46,8 @@ MainComponent::MainComponent()
 	leftPlayList = std::make_unique<PlaylistComponent>();
 	rightPlayList = std::make_unique<PlaylistComponent>();
 
+	wave = std::make_unique<DualWaveformComponent>();
+
 	// addAndMakeVisible(dock);
 	// addAndMakeVisible(tabDock);
 	addAndMakeVisible(advancedDock);
@@ -56,6 +58,7 @@ MainComponent::MainComponent()
 	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 2);
 	advancedDock.addComponentToNewRow(leftPlayList.get(), 1);
 	advancedDock.addComponentToNewColumn(rightPlayList.get(), 1, 1);
+	advancedDock.addComponentToNewRow(wave.get(), 2);
 
 	juce::PropertiesFile::Options options;
 	options.applicationName = "RadioBlast";
@@ -105,6 +108,16 @@ MainComponent::MainComponent()
 		onTrackLoaded(file, true);
 		leftFileBrowser->getSampler()->loadSample(file);
 		leftFileBrowser->getSampler()->play();
+		int deck = 0; // Left deck
+
+		WaveformGenerator::generateWaveformDataAsync(file, 2000,
+			[this, deck](WaveformGenerator::WaveformData data) {
+				if (data.isValid)
+				{
+					wave->setWaveformData(deck, data.samples, data.duration);
+				}
+			});
+
 		};
 
 	leftPlayList->onPlaylistFinished = [this]() {
@@ -116,7 +129,27 @@ MainComponent::MainComponent()
 		onTrackLoaded(file, false);
 		rightFileBrowser->getSampler()->loadSample(file);
 		rightFileBrowser->getSampler()->play();
+		int deck = 1; // right deck
+
+		WaveformGenerator::generateWaveformDataAsync(file, 2000,
+			[this, deck](WaveformGenerator::WaveformData data) {
+				if (data.isValid)
+				{
+					wave->setWaveformData(deck, data.samples, data.duration);
+				}
+			});
+
 		};
+
+
+	wave->onScrubbed = [this](int deck, double position) {
+		// Position des entsprechenden Samplers setzen
+
+	};
+
+	wave->onPositionClicked = [this](int deck, double position) {
+		// Sofort zur Position springen
+	};
 
 	rightPlayList->onPlaylistFinished = [this]() {
 

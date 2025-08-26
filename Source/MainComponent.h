@@ -7,6 +7,9 @@
 #include "JDockableWindows.h"
 #include "JAdvancedDock.h"
 #include "DJLookAndFeel.h"
+#include "WaveformGenerator.h"
+#include "DualWavefromComponent.h"
+
 //==============================================================================
 /*
     This component lives inside our window, and this is where you should put all
@@ -99,6 +102,8 @@ private:
     std::unique_ptr<PlaylistComponent> rightPlayList = nullptr;
 	std::unique_ptr<MixerComponent> mixer = nullptr;
     
+    std::unique_ptr<DualWaveformComponent> wave = nullptr;
+
     juce::StretchableLayoutManager stretchableManager;
     juce::StretchableLayoutResizerBar resizerBar;
 
