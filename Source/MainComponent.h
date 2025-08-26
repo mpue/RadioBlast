@@ -9,6 +9,7 @@
 #include "DJLookAndFeel.h"
 #include "WaveformGenerator.h"
 #include "DualWavefromComponent.h"
+#include "SamplePlayer.h"
 
 //==============================================================================
 /*
@@ -116,11 +117,14 @@ private:
     juce::ApplicationProperties appProperties;
 
     std::unique_ptr<DJLookAndFeel> djLookAndFeel;
+    std::unique_ptr<SamplePlayer> samplePlayer;
 
     float leftChannelRMS = 0.0f;
     float rightChannelRMS = 0.0f;
     float masterLeftRMS = 0.0f;
     float masterRightRMS = 0.0f;
+    float samplePlayerRMS = 0.0f;
+
 
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)

@@ -47,6 +47,7 @@ MainComponent::MainComponent()
 	rightPlayList = std::make_unique<PlaylistComponent>();
 
 	wave = std::make_unique<DualWaveformComponent>();
+	samplePlayer = std::make_unique<SamplePlayer>();
 
 	// addAndMakeVisible(dock);
 	// addAndMakeVisible(tabDock);
@@ -54,8 +55,9 @@ MainComponent::MainComponent()
 
 	// Add visible components
 	advancedDock.addComponentToNewColumn(leftFileBrowser.get(), 0, 0);
-	advancedDock.addComponentToNewColumn(mixer.get(), 0, 1, 200);
-	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 2);
+	advancedDock.addComponentToNewColumn(mixer.get(), 0, 1, 300);
+	advancedDock.addComponentToNewColumn(samplePlayer.get(), 0, 2, 300);
+	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 3);
 	advancedDock.addComponentToNewRow(leftPlayList.get(), 1);
 	advancedDock.addComponentToNewColumn(rightPlayList.get(), 1, 1);
 	advancedDock.addComponentToNewRow(wave.get(), 2);
@@ -398,11 +400,16 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 	std::vector<float> rightSamplerL(bufferToFill.numSamples, 0.0f);
 	std::vector<float> rightSamplerR(bufferToFill.numSamples, 0.0f);
 
+	// === NEU: Sample Player Buffers ===
+	std::vector<float> samplePlayerL(bufferToFill.numSamples, 0.0f);
+	std::vector<float> samplePlayerR(bufferToFill.numSamples, 0.0f);
+
 	// Level monitoring variables
 	float leftChannelSum = 0.0f;
 	float rightChannelSum = 0.0f;
 	float masterLeftSum = 0.0f;
 	float masterRightSum = 0.0f;
+	float samplePlayerSum = 0.0f; // NEU: für Sample Player Level
 
 	// Generate sampler outputs
 	if (leftSampler && leftSampler->isPlaying()) {
@@ -415,6 +422,12 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 			bufferToFill.numSamples, mixer->getRightChannelGain(), rightPitch);
 	}
 
+	// === NEU: Sample Player Output generieren ===
+	if (samplePlayer && samplePlayer->isAnySamplePlaying()) {
+		samplePlayer->generateSampleOutput(samplePlayerL, samplePlayerR,
+			bufferToFill.numSamples, 1.0f); // Gain kann über UI gesteuert werden
+	}
+
 	// Output Routing with level monitoring
 	for (int j = 0; j < bufferToFill.numSamples; ++j) {
 
@@ -422,8 +435,12 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 		float leftChannelLevel = std::sqrt(leftSamplerL[j] * leftSamplerL[j] + leftSamplerR[j] * leftSamplerR[j]);
 		float rightChannelLevel = std::sqrt(rightSamplerL[j] * rightSamplerL[j] + rightSamplerR[j] * rightSamplerR[j]);
 
+		// === NEU: Sample Player Level berechnen ===
+		float samplePlayerLevel = std::sqrt(samplePlayerL[j] * samplePlayerL[j] + samplePlayerR[j] * samplePlayerR[j]);
+
 		leftChannelSum += leftChannelLevel * leftChannelLevel;
 		rightChannelSum += rightChannelLevel * rightChannelLevel;
+		samplePlayerSum += samplePlayerLevel * samplePlayerLevel; // NEU
 
 		// === LEFT DECK ROUTING ===
 		auto leftDest = mixer->getLeftChannelDestination();
@@ -492,6 +509,17 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 			if (outNumChans > 2) outputData[2][j] += rightSamplerL[j];
 			if (outNumChans > 3) outputData[3][j] += rightSamplerR[j];
 		}
+
+		// === NEU: Sample Player direkt zum Master Output hinzufügen ===
+		// Sample Player wird immer auf Master gemischt (kann später erweitert werden)
+		if (outNumChans > 0) {
+			outputData[0][j] += samplePlayerL[j];
+			masterLeftSum += samplePlayerL[j] * samplePlayerL[j];
+		}
+		if (outNumChans > 1) {
+			outputData[1][j] += samplePlayerR[j];
+			masterRightSum += samplePlayerR[j] * samplePlayerR[j];
+		}
 	}
 
 	// Calculate RMS levels for meters
@@ -502,14 +530,21 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 		masterLeftRMS = std::sqrt(masterLeftSum / bufferToFill.numSamples);
 		masterRightRMS = std::sqrt(masterRightSum / bufferToFill.numSamples);
 
+		// === NEU: Sample Player RMS Level ===
+		samplePlayerRMS = std::sqrt(samplePlayerSum / bufferToFill.numSamples);
+
 		// Update level meters on message thread
 		juce::MessageManager::callAsync([this]()
 			{
 				if (mixer)
 				{
-					mixer->updateLeftChannelLevel(leftChannelRMS, leftChannelRMS);
-					mixer->updateRightChannelLevel(rightChannelRMS, rightChannelRMS);
-					mixer->updateMasterLevels(masterLeftRMS, masterRightRMS);
+					mixer->updateChannelLevels(0, leftChannelRMS, rightChannelRMS);
+					mixer->updateChannelLevels(1, leftChannelRMS, rightChannelRMS);
+					mixer->updateTrueMasterLevels(masterLeftRMS, masterRightRMS);
+
+					// === NEU: Sample Player Levels an UI weiterleiten (optional) ===
+					// Hier können Sie die Sample Player Levels an Ihre UI weiterleiten
+					// z.B. mixer->updateSamplePlayerLevels(samplePlayerRMS);
 				}
 			});
 	}
@@ -590,4 +625,5 @@ void MainComponent::resized()
 	// dock.setBounds(area.reduced(4));
 	// tabDock.setBounds(area.reduced(4));
 	advancedDock.setBounds(area.reduced(4));
+
 }

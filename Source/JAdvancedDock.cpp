@@ -453,8 +453,6 @@ void JAdvancedDock::addComponentToNewRow(Component* component, int rowPosition)
 	resized();
 }
 
-// NEW METHODS FOR COLUMN SUPPORT
-
 void JAdvancedDock::addComponentToNewColumn(Component* component, int rowIndex, int columnPosition, double width)
 {
 	auto dockable = manager.createDockableComponent(component);

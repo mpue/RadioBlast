@@ -11,6 +11,7 @@
 #include "BPMAnalyzer.h"
 #include "LevelMeterComponent.h"
 
+
 class MixerComponent : public juce::Component
 {
 public:
@@ -90,7 +91,8 @@ public:
         addAndMakeVisible(rightOutputLabel.get());
 
         // Crossfader Section
-        crossfader = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::TextBoxBelow);
+        crossfader = std::make_unique<juce::Slider>();
+		crossfader->setSliderStyle(juce::Slider::LinearHorizontal);
         crossfader->setRange(-1.0, 1.0, 0.01);
         crossfader->setValue(0.0);
         addAndMakeVisible(crossfader.get());
@@ -109,8 +111,10 @@ public:
         addAndMakeVisible(crossfaderCCLabel.get());
 
         // Pitch/Tempo Slider (±8% wie bei echten DJ Mixern)
-        leftPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
-        rightPitchSlider = std::make_unique<juce::Slider>(juce::Slider::LinearHorizontal, juce::Slider::NoTextBox);
+        leftPitchSlider = std::make_unique<juce::Slider>();
+		leftPitchSlider->setSliderStyle(juce::Slider::LinearHorizontal);
+        rightPitchSlider = std::make_unique<juce::Slider>();
+		rightPitchSlider->setSliderStyle(juce::Slider::LinearHorizontal);
         leftPitchSlider->setRange(-1.0, 1.0, 0.01);
         rightPitchSlider->setRange(-1.0, 1.0, 0.01);
         leftPitchSlider->setValue(0.0);
@@ -891,33 +895,48 @@ public:
         crossfaderCCLabel->setText(cc >= 0 ? "CC: " + juce::String(cc) : "CC: -", juce::dontSendNotification);
     }
 
-    // Level Meter Updates (unverändert)
-    void updateLeftChannelLevel(float leftLevel, float rightLevel)
+    void updateChannelLevels(int deck, float leftSample, float rightSample)
     {
-        if (leftLevelMeter)
+        if (deck == 0 && leftLevelMeter) // Deck A
         {
-            float rmsLevel = std::sqrt((leftLevel * leftLevel + rightLevel * rightLevel) * 0.5f);
-            leftLevelMeter->setLevel(rmsLevel);
+            // True stereo metering - nutze nur den linken Kanal für linken Meter
+            float level = std::abs(leftSample);
+            leftLevelMeter->setLevel(level);
+        }
+        else if (deck == 1 && rightLevelMeter) // Deck B  
+        {
+            float level = std::abs(rightSample);
+            rightLevelMeter->setLevel(level);
         }
     }
 
-    void updateRightChannelLevel(float leftLevel, float rightLevel)
-    {
-        if (rightLevelMeter)
-        {
-            float rmsLevel = std::sqrt((leftLevel * leftLevel + rightLevel * rightLevel) * 0.5f);
-            rightLevelMeter->setLevel(rmsLevel);
-        }
-    }
-
-    void updateMasterLevels(float masterLeft, float masterRight)
+    // Separate Methode für echte Master-Levels
+    void updateTrueMasterLevels(float finalMasterLeft, float finalMasterRight)
     {
         if (masterLevelMeterL)
-            masterLevelMeterL->setLevel(std::abs(masterLeft));
+        {
+            masterLevelMeterL->setLevel(calculatePeakLevel(finalMasterLeft));
+        }
         if (masterLevelMeterR)
-            masterLevelMeterR->setLevel(std::abs(masterRight));
+        {
+            masterLevelMeterR->setLevel(calculatePeakLevel(finalMasterRight));
+        }
     }
 
+private:
+    float calculatePeakLevel(float sample)
+    {
+        float absSample = std::abs(sample);
+
+        // Logarithmic scaling für bessere Sichtbarkeit
+        if (absSample < 0.001f) return 0.0f;
+
+        float dbValue = 20.0f * std::log10(absSample);
+        // Map from -60dB to 0dB to 0.0 to 1.0
+        float normalizedLevel = juce::jlimit(0.0f, 1.0f, (dbValue + 60.0f) / 60.0f);
+
+        return normalizedLevel;
+    }
 private:
     // GUI Components (erweitert)
     std::unique_ptr<juce::Slider> leftSlider = nullptr;
@@ -974,6 +993,11 @@ private:
     int rightPitchCC = -1;  // NEU
     int crossfaderCC = -1;
 
+	float lastLeftPeak = 0.0f;
+	float lastRightPeak = 0.0f;
+	float lastMasterPeakL = 0.0f;
+	float lastMasterPeakR = 0.0f;
+    
     // Level Meters
     std::unique_ptr<LevelMeter> leftLevelMeter = nullptr;
     std::unique_ptr<LevelMeter> rightLevelMeter = nullptr;
