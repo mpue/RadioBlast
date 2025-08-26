@@ -31,7 +31,8 @@ The advanced dock allows vertical and horizontal splits, as well as tabs.
 class JAdvancedDock
 	:
 	public Component,
-	DockBase
+	DockBase,
+	public DragAndDropContainer
 {
 public:
 	JAdvancedDock(DockableWindowManager& manager_);

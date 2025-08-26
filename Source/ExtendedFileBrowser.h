@@ -97,7 +97,10 @@ public:
     void buttonClicked(juce::Button* button) override;
 
     virtual void timerCallback() override;
-    
+
+    bool isAudioFile(const juce::File& file) const;
+    juce::StringArray getSelectedAudioFiles() const;
+
 private:
     FileBrowserModel* model = nullptr;
     const juce::File& initialDir;
@@ -109,5 +112,8 @@ private:
     bool playing = false;
     std::vector<juce::Button*> driveButtons;
     bool left = false;
+    bool isDragging = false;
+    juce::Point<int> dragStartPosition;
+
 };
 

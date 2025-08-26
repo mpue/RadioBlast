@@ -41,6 +41,8 @@ public:
         // Standard-Farben setzen
         setColour(juce::ResizableWindow::backgroundColourId, darkBackground);
         setColour(juce::DocumentWindow::backgroundColourId, darkBackground);
+        setColour(DocumentWindow::backgroundColourId, Colour(0xff333333));
+        setColour(DocumentWindow::textColourId, juce::Colours::white);
 
         // Slider-Farben
         setColour(juce::Slider::backgroundColourId, mediumBackground);
@@ -70,6 +72,12 @@ public:
         setColour(juce::PopupMenu::textColourId, primaryText);
         setColour(juce::PopupMenu::highlightedBackgroundColourId, primaryBlue);
         setColour(juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
+
+        setColour(juce::GroupComponent::textColourId, juce::Colours::white);
+        setColour(juce::GroupComponent::outlineColourId, juce::Colours::grey);
+        setColour(juce::ListBox::backgroundColourId, juce::Colour(0xff333333));
+        setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff444444));
+        setColour(juce::TextButton::buttonColourId, juce::Colour(0xff444444));
     }
 
     // === CUSTOM SLIDER DRAWING ===

@@ -17,7 +17,8 @@ class MainComponent : public juce::AudioAppComponent,
                       public juce::TimeSliceThread, 
                       public juce::MidiInputCallback,
                       public juce::MenuBarModel,
-	                  public juce::ChangeListener
+	                  public juce::ChangeListener,
+                      public juce::DragAndDropContainer
 {
 public:
     //==============================================================================

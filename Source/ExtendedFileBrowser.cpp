@@ -33,7 +33,7 @@ left(left){
     table->getHeader().addColumn("File", 1, 350);
     table->getHeader().addColumn("Size", 2, 50);
     table->setModel(model);
-
+   
     juce::Array<juce::File> drives;
 
     File::findFileSystemRoots(drives);
@@ -85,14 +85,76 @@ ExtendedFileBrowser::~ExtendedFileBrowser() {
         
 }
 
-void ExtendedFileBrowser::mouseDrag(const juce::MouseEvent &event) {
-    /*
-    var description;
-    
-    // setDragImageForIndex(0, ImageCache::getFromMemory(BinaryData::module_png, BinaryData::module_pngSize));
-    startDragging(description,table);
-     */
+void ExtendedFileBrowser::mouseDrag(const juce::MouseEvent& event) {
+    // Nur starten wenn noch nicht am Dragging und Maus weit genug bewegt
+    if (!isDragging && event.getDistanceFromDragStart() > 5) {
 
+        // Prüfen ob eine Zeile ausgewählt ist
+        int selectedRow = table->getSelectedRow();
+        if (selectedRow > 0) { // > 0 weil 0 ist "[..]"
+
+            File selectedFile = model->getDirectoryList()->getFile(selectedRow);
+
+            // Nur Audio-Dateien können gedraggt werden
+            if (isAudioFile(selectedFile)) {
+                isDragging = true;
+
+                // StringArray mit Dateipfaden für Drag&Drop erstellen
+                juce::StringArray files;
+                files.add(selectedFile.getFullPathName());
+
+                // WICHTIG: Drag-Data muss als StringArray übergeben werden
+                juce::var dragDescription = files;
+
+                // DEBUG: Prüfen was übergeben wird
+                DBG("Dragging files: " + files.joinIntoString(", "));
+
+                // Thumbnail für Drag-Vorschau erstellen
+                juce::Image dragImage(juce::Image::ARGB, 100, 20, true);
+                juce::Graphics g(dragImage);
+                g.setColour(juce::Colours::darkblue.withAlpha(0.8f));
+                g.fillRoundedRectangle(0, 0, 100, 20, 5.0f);
+                g.setColour(juce::Colours::white);
+                g.setFont(12.0f);
+                g.drawText(selectedFile.getFileNameWithoutExtension(),
+                    0, 0, 100, 20, juce::Justification::centred);
+
+                // Drag starten - mit Parent als Container
+                // if (auto* container = findParentComponentOfClass<juce::DragAndDropContainer>())
+                {
+                    startDragging(dragDescription, this, dragImage, true);
+                }
+                // DEBUG-Ausgabe
+                DBG("Starting drag for file: " + selectedFile.getFullPathName());
+            }
+        }
+    }
+}
+bool ExtendedFileBrowser::isAudioFile(const juce::File& file) const {
+    if (file.isDirectory()) return false;
+
+    juce::String extension = file.getFileExtension().toLowerCase();
+    return extension == ".wav" || extension == ".mp3" ||
+        extension == ".flac" || extension == ".ogg" ||
+        extension == ".aiff" || extension == ".aif" ||
+        extension == ".m4a";
+}
+
+juce::StringArray ExtendedFileBrowser::getSelectedAudioFiles() const {
+    juce::StringArray audioFiles;
+
+    int selectedRow = table->getSelectedRow();
+    if (selectedRow > 0) { // > 0 weil 0 ist "[..]"
+        File selectedFile = model->getDirectoryList()->getFile(selectedRow);
+        if (isAudioFile(selectedFile)) {
+            audioFiles.add(selectedFile.getFullPathName());
+        }
+    }
+
+    // Hier könntest du später Multi-Select-Support hinzufügen
+    // indem du durch alle ausgewählten Zeilen iterierst
+
+    return audioFiles;
 }
 
 void ExtendedFileBrowser::paint(juce::Graphics &g) {
@@ -115,6 +177,10 @@ void ExtendedFileBrowser::changeListenerCallback (ChangeBroadcaster* source) {
 }
 
 void ExtendedFileBrowser::mouseDown(const juce::MouseEvent &event) {
+
+    isDragging = false;
+    dragStartPosition = event.getPosition();
+
     if (table->getSelectedRow() > 0) {
         File* f = new File(model->getDirectoryList()->getFile(table->getSelectedRow()));
         if (f->exists()) {
