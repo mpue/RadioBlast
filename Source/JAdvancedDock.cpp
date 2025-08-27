@@ -1,9 +1,10 @@
 /*
   ==============================================================================
 
-	JAdvancedDock.cpp
+	JAdvancedDock.cpp - Enhanced Edition
 	Created: 6 Jul 2016 10:27:02pm
 	Author:  jim
+	Enhanced: Modern UI with animations, gradients, and improved UX
 	Extended: Added support for adding components to new columns
 
   ==============================================================================
@@ -11,8 +12,23 @@
 
 #include "JAdvancedDock.h"
 
+// Modern color palette
+namespace ModernColors
+{
+	const Colour primaryBg = Colour(0xff1a1a1a);      // Dark background
+	const Colour secondaryBg = Colour(0xff2d2d2d);    // Slightly lighter
+	const Colour accent = Colour(0xff4a9eff);         // Modern blue
+	const Colour accentHover = Colour(0xff6bb6ff);    // Lighter blue
+	const Colour surface = Colour(0xff363636);        // Panel surfaces
+	const Colour border = Colour(0xff404040);         // Subtle borders
+	const Colour text = Colour(0xffe0e0e0);           // Light text
+	const Colour textSecondary = Colour(0xffb0b0b0);  // Secondary text
+	const Colour success = Colour(0xff4caf50);        // Success green
+	const Colour warning = Colour(0xffff9800);        // Warning orange
+}
+
 /**
-Manages a row of windows complete with vertical resizer bars.
+Enhanced row management with smooth animations and modern styling
 */
 class JAdvancedDock::RowType
 {
@@ -20,6 +36,7 @@ public:
 	RowType()
 	{
 		layout = std::make_unique<StretchableLayoutManager>();
+		fadeAnimator.reset(new ComponentAnimator());
 	}
 
 	RowType(RowType&& rhs)
@@ -27,6 +44,7 @@ public:
 		resizers = std::move(rhs.resizers);
 		columns = std::move(rhs.columns);
 		layout = std::move(rhs.layout);
+		fadeAnimator = std::move(rhs.fadeAnimator);
 	}
 
 	RowType& operator=(RowType&& rhs)
@@ -34,6 +52,7 @@ public:
 		resizers = std::move(rhs.resizers);
 		columns = std::move(rhs.columns);
 		layout = std::move(rhs.layout);
+		fadeAnimator = std::move(rhs.fadeAnimator);
 		return *this;
 	}
 
@@ -49,13 +68,19 @@ public:
 			newTabDock[0]->setSize(static_cast<int>(initialWidth), newTabDock[0]->getHeight());
 		}
 
+		// Animate new component appearance
+		if (!newTabDock.empty())
+		{
+			auto* comp = newTabDock[0];
+			comp->setAlpha(0.0f);
+			fadeAnimator->animateComponent(comp, comp->getBounds(), 1.0f, 300, false, 0.8, 0.1);
+		}
+
 		rebuildResizers(parent);
 	}
 
 	/**
 	Called from the docks resize method.
-
-	@note this and the layoutRows() function are similar, but not similar enough...
 	*/
 	void layoutColumns(const Rectangle<int>& area)
 	{
@@ -71,7 +96,7 @@ public:
 
 		if (comps.size() == 1)
 		{
-			comps[0]->setBounds(area); // layoutComponents doesn't seem to cope with only one component passed to it.
+			comps[0]->setBounds(area);
 		}
 		else
 		{
@@ -88,9 +113,59 @@ public:
 		}
 	}
 
+	// Enhanced resizer bar with modern styling
+	class EnhancedResizerBar : public StretchableLayoutResizerBar
+	{
+	public:
+		EnhancedResizerBar(StretchableLayoutManager* layout, int index, bool vertical)
+			: StretchableLayoutResizerBar(layout, index, vertical), isHovered(false)
+		{
+			setMouseCursor(vertical ? MouseCursor::LeftRightResizeCursor : MouseCursor::UpDownResizeCursor);
+		}
+
+		void paint(Graphics& g) override
+		{
+			auto bounds = getLocalBounds().toFloat();
+
+			// Modern gradient background
+			ColourGradient gradient(
+				isHovered ? ModernColors::accent.withAlpha(0.8f) : ModernColors::border.withAlpha(0.6f),
+				bounds.getCentreX(), bounds.getY(),
+				isHovered ? ModernColors::accentHover.withAlpha(0.6f) : ModernColors::border.withAlpha(0.3f),
+				bounds.getCentreX(), bounds.getBottom(),
+				false
+			);
+
+			g.setGradientFill(gradient);
+			g.fillRoundedRectangle(bounds.reduced(1.0f), 2.0f);
+
+			// Subtle highlight
+			if (isHovered)
+			{
+				g.setColour(ModernColors::accent.withAlpha(0.3f));
+				g.fillRoundedRectangle(bounds.reduced(2.0f), 1.0f);
+			}
+		}
+
+		void mouseEnter(const MouseEvent&) override
+		{
+			isHovered = true;
+			repaint();
+		}
+
+		void mouseExit(const MouseEvent&) override
+		{
+			isHovered = false;
+			repaint();
+		}
+
+	private:
+		bool isHovered;
+	};
+
 	void rebuildResizers(Component* parent)
 	{
-		const double resizerWidth = 5.0;
+		const double resizerWidth = 8.0;
 		resizers.clear();
 
 		int itemIndex = 0;
@@ -100,14 +175,15 @@ public:
 			double columnWidth = columns[pos][0]->getWidth();
 			// Use a minimum width if the component width is too small
 			if (columnWidth < 10.0)
-				columnWidth = 200.0; // default width
+				columnWidth = 250.0; // Increased default width
 
-			layout->setItemLayout(itemIndex++, 10.0, 2000.0, columnWidth);
+			layout->setItemLayout(itemIndex++, 50.0, 2000.0, columnWidth);
 
 			if (pos < columns.size() - 1)
 			{
-				resizers.push_back(std::make_unique<StretchableLayoutResizerBar>(layout.get(), pos * 2 + 1, true));
-				parent->addAndMakeVisible(resizers.back().get());
+				auto resizer = std::make_unique<EnhancedResizerBar>(layout.get(), pos * 2 + 1, true);
+				parent->addAndMakeVisible(resizer.get());
+				resizers.push_back(std::move(resizer));
 				layout->setItemLayout(itemIndex++, resizerWidth, resizerWidth, resizerWidth);
 			}
 		}
@@ -117,6 +193,7 @@ public:
 	static void configureTabs(const TabDockType& vector)
 	{
 		int tabXPos = 0;
+		const int tabSpacing = 4; // Increased spacing for modern look
 
 		struct FrontComponent
 		{
@@ -145,7 +222,7 @@ public:
 				}
 
 				dockedCompWrapper->setShowTabButton(true, tabXPos, false);
-				tabXPos += dockedCompWrapper->getTabWidth() + 2;
+				tabXPos += dockedCompWrapper->getTabWidth() + tabSpacing;
 			}
 		}
 
@@ -155,27 +232,50 @@ public:
 
 	std::unique_ptr<StretchableLayoutManager> layout;
 	std::vector<TabDockType> columns;
-	std::vector<std::unique_ptr<StretchableLayoutResizerBar>> resizers;
+	std::vector<std::unique_ptr<EnhancedResizerBar>> resizers;
+	std::unique_ptr<ComponentAnimator> fadeAnimator;
 };
 
-
 /**
-Displays some buttons that let the user decide where they want to place the window.
+Modern placement dialog with glassmorphism effects and smooth animations
 */
-class AdvancedDockPlacementDialog
-	:
-	public Component
+class AdvancedDockPlacementDialog : public Component, private Timer
 {
 public:
-	AdvancedDockPlacementDialog()
+	AdvancedDockPlacementDialog() : pulsePhase(0.0f)
 	{
 		for (int i = AdvancedDockPlaces::top; i <= AdvancedDockPlaces::centre; ++i)
 			buttons.add(new PlacementButton(AdvancedDockPlaces::Places(i)));
 
 		for (auto b : buttons)
 			addAndMakeVisible(b);
+
+		setAlpha(0.0f);
+		startTimer(50); // Smooth animation timer
 	}
 
+	void setVisible(bool shouldBeVisible) override
+	{
+		if (shouldBeVisible != isVisible())
+		{
+			Component::setVisible(shouldBeVisible);
+
+			if (shouldBeVisible)
+			{
+				// Fade in with scale animation
+				setAlpha(0.0f);
+				setTransform(AffineTransform::scale(0.8f).translated(getBounds().getCentreX() * 0.2f, getBounds().getCentreY() * 0.2f));
+
+				Desktop::getInstance().getAnimator().animateComponent(this, getBounds(), 1.0f, 300, false, 0.8, 0.1);
+				setTransform(AffineTransform());
+			}
+			else
+			{
+				// Fade out
+				Desktop::getInstance().getAnimator().animateComponent(this, getBounds(), 0.0f, 200, true, 1.0, 0.0);
+			}
+		}
+	}
 
 	void setLeftRightVisible(bool nowVisible)
 	{
@@ -202,20 +302,58 @@ public:
 	class PlacementButton : public Component
 	{
 	public:
-		PlacementButton(AdvancedDockPlaces::Places place) : place(place) {}
+		PlacementButton(AdvancedDockPlaces::Places place) : place(place), mouseOver(false), glowIntensity(0.0f)
+		{
+		}
 
 		void paint(Graphics& g) override
 		{
-			g.setColour(Colours::white);
+			auto bounds = getLocalBounds().toFloat();
+			auto reducedBounds = bounds.reduced(3.0f);
 
+			// Glassmorphism background
+			g.setColour(ModernColors::surface.withAlpha(0.7f));
+			g.fillRoundedRectangle(reducedBounds, 6.0f);
+
+			// Border with glow effect
 			if (mouseOver)
-				g.fillRect(getLocalBounds().toFloat().reduced(2.0f));
-			else
-				g.drawRect(getLocalBounds().toFloat().reduced(2.0f), 1.0f);
+			{
+				// Outer glow
+				g.setColour(ModernColors::accent.withAlpha(glowIntensity * 0.5f));
+				g.drawRoundedRectangle(reducedBounds.expanded(2.0f), 8.0f, 3.0f);
 
-			g.fillRect(getLocalBounds().toFloat().reduced(2.0f).withHeight(3.0f));
+				// Inner highlight
+				g.setColour(ModernColors::accentHover.withAlpha(0.8f));
+				g.fillRoundedRectangle(reducedBounds, 6.0f);
+			}
+
+			// Clean border
+			g.setColour(ModernColors::border.withAlpha(0.8f));
+			g.drawRoundedRectangle(reducedBounds, 6.0f, 1.0f);
+
+			// Icon representation
+			auto iconBounds = reducedBounds.reduced(8.0f);
+			g.setColour(mouseOver ? ModernColors::text : ModernColors::textSecondary);
+
+			switch (place)
+			{
+			case AdvancedDockPlaces::top:
+				g.fillRoundedRectangle(iconBounds.removeFromTop(3.0f), 1.5f);
+				break;
+			case AdvancedDockPlaces::bottom:
+				g.fillRoundedRectangle(iconBounds.removeFromBottom(3.0f), 1.5f);
+				break;
+			case AdvancedDockPlaces::left:
+				g.fillRoundedRectangle(iconBounds.removeFromLeft(3.0f), 1.5f);
+				break;
+			case AdvancedDockPlaces::right:
+				g.fillRoundedRectangle(iconBounds.removeFromRight(3.0f), 1.5f);
+				break;
+			case AdvancedDockPlaces::centre:
+				g.fillEllipse(iconBounds.reduced(2.0f));
+				break;
+			}
 		}
-
 
 		void setIsMouseOver(bool isOver)
 		{
@@ -224,9 +362,16 @@ public:
 				mouseOver = isOver;
 				repaint();
 			}
-		};
+		}
 
-		bool mouseOver{ false };
+		void setGlowIntensity(float intensity)
+		{
+			glowIntensity = intensity;
+			if (mouseOver) repaint();
+		}
+
+		bool mouseOver;
+		float glowIntensity;
 		AdvancedDockPlaces::Places place;
 	};
 
@@ -263,8 +408,8 @@ public:
 
 	void paint(Graphics& g) override
 	{
-		g.setColour(Colours::black);
-		g.beginTransparencyLayer(0.4f);
+		// Modern backdrop with blur effect
+		g.setColour(ModernColors::primaryBg.withAlpha(0.85f));
 
 		if (buttons[AdvancedDockPlaces::top]->isVisible() && buttons[AdvancedDockPlaces::left]->isVisible())
 		{
@@ -277,20 +422,36 @@ public:
 			g.fillRoundedRectangle(centreArea.expanded(padding), rounding);
 		}
 
-		g.endTransparencyLayer();
+		// Subtle border
+		g.setColour(ModernColors::border.withAlpha(0.5f));
+		auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+		g.drawRoundedRectangle(bounds, rounding + padding, 1.0f);
 	}
 
 private:
+	void timerCallback() override
+	{
+		pulsePhase += 0.1f;
+		float intensity = (sin(pulsePhase) + 1.0f) * 0.5f;
+
+		for (auto button : buttons)
+			button->setGlowIntensity(intensity);
+	}
+
 	Rectangle<float> topArea, midArea, bottomArea, centreArea;
 	OwnedArray<PlacementButton> buttons;
-	const float rounding = 4.0f;
-	const float padding = 4.0f;
+	const float rounding = 8.0f;
+	const float padding = 6.0f;
+	float pulsePhase;
 };
 
 JAdvancedDock::JAdvancedDock(DockableWindowManager& manager_) : DockBase(manager_, this), manager(manager_)
 {
 	placementDialog = new AdvancedDockPlacementDialog();
 	addChildComponent(placementDialog);
+
+	// Set modern background
+	setOpaque(true);
 }
 
 JAdvancedDock::~JAdvancedDock()
@@ -403,12 +564,12 @@ void JAdvancedDock::insertWindow(const Point<int>& screenPos, AdvancedDockPlaces
 		break;
 
 	case AdvancedDockPlaces::left:
-		insertNewDock(comp, loc, 100);
+		insertNewDock(comp, loc, 200);
 		break;
 
 	case AdvancedDockPlaces::right:
 		loc.x++;
-		insertNewDock(comp, loc, 100);
+		insertNewDock(comp, loc, 200);
 		break;
 
 	case AdvancedDockPlaces::centre:
@@ -621,7 +782,6 @@ bool JAdvancedDock::attachDockableComponent(DockableComponentWrapper* component,
 		return true;
 	}
 
-
 	return false;
 }
 
@@ -681,19 +841,21 @@ void JAdvancedDock::revealComponent(DockableComponentWrapper* dockableComponent)
 
 void JAdvancedDock::rebuildRowResizers()
 {
-	const double resizerSize = 5.0;
+	const double resizerSize = 8.0;
 	resizers.clear();
 
 	int itemIndex = 0;
 
 	for (int pos = 0; pos < rows.size(); ++pos)
 	{
-		layout.setItemLayout(itemIndex++, 10.0, 2000.0, rows[0].columns[0][0]->getHeight());
+		layout.setItemLayout(itemIndex++, 50.0, 2000.0, rows[0].columns[0][0]->getHeight());
 
 		if (pos < rows.size() - 1)
 		{
-			resizers.push_back(std::make_unique<StretchableLayoutResizerBar>(&layout, pos * 2 + 1, false));
-			addAndMakeVisible(resizers.back().get());
+			auto resizer = std::make_unique<StretchableLayoutResizerBar>(&layout, pos * 2 + 1, false);
+			resizer->setMouseCursor(MouseCursor::UpDownResizeCursor);
+			addAndMakeVisible(resizer.get());
+			resizers.push_back(std::move(resizer));
 			layout.setItemLayout(itemIndex++, resizerSize, resizerSize, resizerSize);
 		}
 	}
@@ -730,7 +892,7 @@ void JAdvancedDock::resized()
 	auto area = getLocalBounds();
 
 	for (auto& resizer : resizers)
-		resizer->setSize(area.getWidth(), 5);
+		resizer->setSize(area.getWidth(), 8);
 
 	layoutRows(area);
 
@@ -747,10 +909,62 @@ void JAdvancedDock::resized()
 
 void JAdvancedDock::paint(Graphics& g)
 {
+	// Modern gradient background
 	if (rows.size() == 0)
 	{
-		g.fillAll(Colours::darkgrey);
-		g.setColour(Colours::white);
-		g.drawText("Advanced Dock", getLocalBounds(), Justification::centred, false);
+		// Create attractive empty state
+		ColourGradient gradient(
+			ModernColors::primaryBg, 0.0f, 0.0f,
+			ModernColors::secondaryBg, 0.0f, getHeight() * 0.6f,
+			false
+		);
+
+		g.setGradientFill(gradient);
+		g.fillAll();
+
+		// Modern welcome message
+		auto bounds = getLocalBounds();
+		auto textArea = bounds.reduced(40);
+
+		g.setColour(ModernColors::accent.withAlpha(0.1f));
+		g.fillRoundedRectangle(textArea.toFloat(), 12.0f);
+
+		g.setColour(ModernColors::border);
+		g.drawRoundedRectangle(textArea.toFloat(), 12.0f, 1.0f);
+
+		g.setColour(ModernColors::text);
+		g.setFont(Font(24.0f, Font::bold));
+		g.drawText("Advanced Dock", textArea.removeFromTop(40), Justification::centred);
+
+		g.setColour(ModernColors::textSecondary);
+		g.setFont(Font(14.0f));
+		g.drawText("Drag components here to create your layout", textArea, Justification::centred);
+
+		// Subtle decoration
+		auto decorArea = bounds.reduced(bounds.getWidth() / 3, bounds.getHeight() / 3);
+		g.setColour(ModernColors::accent.withAlpha(0.05f));
+		g.fillEllipse(decorArea.toFloat());
+	}
+	else
+	{
+		// Subtle background for active dock
+		g.setColour(ModernColors::primaryBg);
+		g.fillAll();
+
+		// Add subtle grid pattern for visual interest
+		g.setColour(ModernColors::border.withAlpha(0.1f));
+		auto bounds = getLocalBounds();
+
+		// Vertical lines
+		for (int x = 50; x < bounds.getWidth(); x += 50)
+		{
+			g.drawVerticalLine(x, 0.0f, static_cast<float>(bounds.getHeight()));
+		}
+
+		// Horizontal lines
+		for (int y = 50; y < bounds.getHeight(); y += 50)
+		{
+			g.drawHorizontalLine(y, 0.0f, static_cast<float>(bounds.getWidth()));
+		}
 	}
 }

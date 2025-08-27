@@ -394,7 +394,7 @@ DockableComponentTitleBar::DockableComponentTitleBar(DockableComponentWrapper& o
 
 void DockableComponentTitleBar::paint(Graphics& g)
 {
-	g.fillAll(Colours::grey);
+	g.fillAll(Colour(0xff111111));
 	g.setFont(Font(12.0).boldened());
 	g.drawText(getDockableComponent().getWindowTitle(), getLocalBounds(), Justification::centred, false);
 
