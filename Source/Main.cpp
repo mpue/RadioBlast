@@ -1,7 +1,7 @@
 /*
   ==============================================================================
 
-    This file contains the basic startup code for a JUCE application.
+    This file contains the basic startup code for a JUCE application with splash screen.
 
   ==============================================================================
 */
@@ -13,6 +13,7 @@
 #if JUCE_WINDOWS
 #include <windows.h>
 #endif
+
 using juce::JUCEApplication;
 using juce::String;
 using juce::Logger;
@@ -21,53 +22,151 @@ using juce::ScopedPointer;
 using juce::Desktop;
 using juce::Rectangle;
 
+namespace RadioBlast
+{
+
+    //==============================================================================
+    class SplashScreen : public juce::Component, public juce::Timer
+    {
+    public:
+        SplashScreen()
+        {
+            setSize(800, 563);
+
+            // Zentriere den Splash Screen
+            auto bounds = juce::Desktop::getInstance().getDisplays().getMainDisplay().userArea;
+            setCentrePosition(bounds.getCentreX(), bounds.getCentreY());
+
+            // Mache das Fenster sichtbar
+            setVisible(true);
+            addToDesktop(juce::ComponentPeer::windowHasDropShadow);
+
+            //  Optional: Lade dein Logo/Image hier
+            logo = juce::ImageCache::getFromMemory(BinaryData::splash_png, BinaryData::splash_pngSize);
+        }
+
+        void paint(juce::Graphics& g) override
+        {
+            // Hintergrund
+            g.fillAll(juce::Colours::white);
+
+
+             // Rahmen
+            g.setColour(juce::Colours::darkgrey);
+            g.drawRect(getLocalBounds(), 2);
+
+             if (logo.isValid())
+             {
+                 auto logoArea = getLocalBounds();
+                 g.drawImage(logo, logoArea.toFloat(), juce::RectanglePlacement::centred);
+             }
+            // App Name
+            g.setColour(juce::Colours::grey);
+            g.setFont(24.0f);
+            g.drawText("RadioBlast", getLocalBounds().removeFromTop(getHeight() / 2),
+                juce::Justification::centred, true);
+
+            // Loading Text
+            g.setFont(14.0f);
+            auto loadingArea = getLocalBounds().removeFromBottom(getHeight() / 3);
+            g.drawText("Wird geladen...", loadingArea, juce::Justification::centred, true);
+
+            // Progress Bar
+            auto progressArea = loadingArea.removeFromBottom(30).reduced(40, 5);
+            g.setColour(juce::Colours::lightgrey);
+            g.fillRect(progressArea);
+
+            g.setColour(juce::Colours::grey);
+            auto progressWidth = (int)(progressArea.getWidth() * progress);
+            g.fillRect(progressArea.removeFromLeft(progressWidth));
+            
+        }
+
+        void startLoading()
+        {
+            progress = 0.0f;
+            startTimer(50); // Update alle 50ms
+        }
+
+        void timerCallback() override
+        {
+            progress += 0.02f; // Simuliere Ladevorgang
+
+            if (progress >= 1.0f)
+            {
+                progress = 1.0f;
+                stopTimer();
+
+                // Kurz warten, dann schlieﬂen
+                juce::Timer::callAfterDelay(500, [this]()
+                    {
+                        if (onLoadingComplete)
+                            onLoadingComplete();
+                    });
+            }
+
+            repaint();
+        }
+
+        std::function<void()> onLoadingComplete;
+
+    private:
+        float progress = 0.0f;
+        juce::Image logo;
+
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SplashScreen)
+    };
+
+}
+
 //==============================================================================
-class RadioBlastApplication  : public juce::JUCEApplication
+class RadioBlastApplication : public juce::JUCEApplication
 {
 public:
-    //==============================================================================
     RadioBlastApplication() {}
 
-    const juce::String getApplicationName() override       { return ProjectInfo::projectName; }
-    const juce::String getApplicationVersion() override    { return ProjectInfo::versionString; }
-    bool moreThanOneInstanceAllowed() override             { return true; }
+    const juce::String getApplicationName() override { return ProjectInfo::projectName; }
+    const juce::String getApplicationVersion() override { return ProjectInfo::versionString; }
+    bool moreThanOneInstanceAllowed() override { return true; }
 
-    //==============================================================================
-    void initialise (const juce::String& commandLine) override
+    void initialise(const juce::String& commandLine) override
     {
-        // This method is where you should put your application's initialisation code..
+        // Erstelle und zeige Splash Screen
+        splashScreen = std::make_unique<RadioBlast::SplashScreen>();
+        splashScreen->onLoadingComplete = [this]()
+            {
+                // Wenn Laden abgeschlossen ist, erstelle Hauptfenster
+                createMainWindow();
+                // Schlieﬂe Splash Screen
+                splashScreen.reset();
+            };
 
-        mainWindow.reset (new MainWindow (getApplicationName()));
+        // Starte Ladevorgang
+        splashScreen->startLoading();
     }
 
     void shutdown() override
     {
-        // Add your application's shutdown code here..
-
-        mainWindow = nullptr; // (deletes our window)
+        splashScreen.reset();
+        mainWindow.reset();
     }
 
-    //==============================================================================
     void systemRequestedQuit() override
     {
-        // This is called when the app is being asked to quit: you can ignore this
-        // request and let the app carry on running, or call quit() to allow the app to close.
         quit();
     }
 
-    void anotherInstanceStarted (const juce::String& commandLine) override
+    void anotherInstanceStarted(const juce::String& commandLine) override
     {
-        // When another instance of the app is launched while this one is running,
-        // this method is invoked, and the commandLine parameter tells you what
-        // the other instance's command-line arguments were.
     }
 
-    //==============================================================================
-    /*
-        This class implements the desktop window that contains an instance of
-        our MainComponent class.
-    */
-    class MainWindow    : public juce::DocumentWindow
+private:
+    void createMainWindow()
+    {
+        mainWindow = std::make_unique<MainWindow>(getApplicationName());
+    }
+
+    class MainWindow : public juce::DocumentWindow
     {
     public:
         MainWindow(String name) : DocumentWindow(name,
@@ -75,13 +174,13 @@ public:
             .findColour(ResizableWindow::backgroundColourId),
             DocumentWindow::allButtons)
         {
-            
             setUsingNativeTitleBar(false);
             setContentOwned(new MainComponent(), true);
             setResizable(true, true);
 
             juce::Rectangle<int> r = Desktop::getInstance().getDisplays().getMainDisplay().userArea;
             centreWithSize(r.getWidth(), r.getHeight());
+
             juce::MessageManager::callAsync([this]()
                 {
                     setMinimised(false);
@@ -100,27 +199,16 @@ public:
 
         void closeButtonPressed() override
         {
-            // This is called when the user tries to close this window. Here, we'll just
-            // ask the app to quit when this happens, but you can change this to do
-            // whatever you need.
             JUCEApplication::getInstance()->systemRequestedQuit();
         }
 
-        /* Note: Be careful if you override any DocumentWindow methods - the base
-           class uses a lot of them, so by overriding you might break its functionality.
-           It's best to do all your work in your content component instead, but if
-           you really have to override any DocumentWindow methods, make sure your
-           subclass also calls the superclass's method.
-        */
-
     private:
-        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainWindow)
+        JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainWindow)
     };
 
-private:
+    std::unique_ptr<RadioBlast::SplashScreen> splashScreen;
     std::unique_ptr<MainWindow> mainWindow;
 };
 
 //==============================================================================
-// This macro generates the main() routine that launches the app.
-START_JUCE_APPLICATION (RadioBlastApplication)
+START_JUCE_APPLICATION(RadioBlastApplication)

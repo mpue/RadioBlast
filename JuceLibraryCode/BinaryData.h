@@ -8,14 +8,17 @@
 
 namespace BinaryData
 {
-    extern const char*   RadioBlast_png;
-    const int            RadioBlast_pngSize = 716976;
+    extern const char*   splash_png;
+    const int            splash_pngSize = 394797;
 
     extern const char*   RadioBlast_ico;
     const int            RadioBlast_icoSize = 38637;
 
+    extern const char*   RadioBlast_png;
+    const int            RadioBlast_pngSize = 716976;
+
     // Number of elements in the namedResourceList and originalFileNames arrays.
-    const int namedResourceListSize = 2;
+    const int namedResourceListSize = 3;
 
     // Points to the start of a list of resource names.
     extern const char* namedResourceList[];
