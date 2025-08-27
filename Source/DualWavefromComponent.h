@@ -9,6 +9,7 @@
 
 #pragma once
 #include <JuceHeader.h>
+#include "WaveformGenerator.h"
 
 class DualWaveformComponent : public juce::Component,
     public juce::Timer,
@@ -32,10 +33,6 @@ public:
     DualWaveformComponent()
     {
         setSize(800, 300);
-
-        // Initialize waveform data
-        deck1Waveform.clear();
-        deck2Waveform.clear();
 
         // Default values
         deck1Position = 0.0;
@@ -99,17 +96,27 @@ public:
         deck1Area.removeFromLeft(60);
         deck2Area.removeFromLeft(60);
 
-        // Draw waveforms
-        drawWaveform(g, deck1Area, deck1Waveform, deck1Position, deck1Length,
-            juce::Colours::cyan, 0, deck1Playing);
-        drawWaveform(g, deck2Area, deck2Waveform, deck2Position, deck2Length,
-            juce::Colours::orange, 1, deck2Playing);
+        WaveformGenerator::drawWaveform(g, deck1Waveform, juce::Rectangle<float>(deck1Area.toFloat()),juce::Colours::grey.withAlpha(0.7f),zoomFactor);
+        WaveformGenerator::drawWaveform(g, deck2Waveform, juce::Rectangle<float>(deck2Area.toFloat()), juce::Colours::grey.withAlpha(0.7f), zoomFactor);
+
+        // Draw playback position marker
+        
+
+
+        // Draw alignment indicators if in alignment mode
+        if (isAligning)
+        {
+            drawAlignmentIndicators(g, deck1Area, 0);
+            drawAlignmentIndicators(g, deck2Area, 1);
+        }
 
         // Draw sync indicators
         drawSyncIndicators(g, bounds);
 
         // Draw zoom and time info
         drawInfoOverlay(g);
+
+
     }
 
     void resized() override
@@ -118,17 +125,19 @@ public:
     }
 
     // === ENHANCED WAVEFORM DATA ===
-    void setWaveformData(int deck, const std::vector<float>& waveformData, double lengthInSeconds)
+    void setWaveformData(int deck, WaveformGenerator::WaveformData data)
     {
+
+
         if (deck == 0)
         {
-            deck1Waveform = waveformData;
-            deck1Length = lengthInSeconds;
+            deck1Waveform = data;
+			deck1Length = data.duration;
         }
         else if (deck == 1)
         {
-            deck2Waveform = waveformData;
-            deck2Length = lengthInSeconds;
+            deck2Waveform = data;
+            deck2Length = data.duration;
         }
         repaint();
     }
@@ -137,14 +146,14 @@ public:
     {
         if (deck == 0)
         {
-            deck1Waveform.clear();
+
             deck1Length = 0.0;
             deck1Position = 0.0;
             deck1Playing = false;
         }
         else if (deck == 1)
         {
-            deck2Waveform.clear();
+
             deck2Length = 0.0;
             deck2Position = 0.0;
             deck2Playing = false;
@@ -399,8 +408,8 @@ public:
 
 private:
     // Waveform data
-    std::vector<float> deck1Waveform;
-    std::vector<float> deck2Waveform;
+    WaveformGenerator::WaveformData deck1Waveform;
+    WaveformGenerator::WaveformData deck2Waveform;
 
     // Playback positions and lengths
     double deck1Position, deck2Position;
@@ -582,131 +591,7 @@ private:
         const std::vector<float>& waveform, double position,
         double length, juce::Colour colour, int deckIndex, bool isPlaying)
     {
-        if (waveform.empty() || length <= 0.0) return;
-
-        // Background for waveform area
-        g.setColour(juce::Colour(0xff333333));
-        g.fillRect(area);
-
-        // Calculate visible time range with alignment offset
-        double visibleLength = length / zoomFactor;
-        double startTime = viewStart;
-        double endTime = startTime + visibleLength;
-
-        // Apply alignment offset for deck comparison
-        double timeOffset = 0.0;
-        if (deckIndex == 1) // Apply offset to deck B for comparison
-        {
-            timeOffset = alignmentOffset;
-        }
-
-        // Draw waveform with enhanced visual feedback
-        float alpha = isPlaying ? 1.0f : 0.6f;
-        g.setColour(colour.withAlpha(alpha));
-
-        int waveformSize = (int)waveform.size();
-        float width = (float)area.getWidth();
-        float height = (float)area.getHeight();
-        float centerY = area.getY() + height * 0.5f;
-
-        // Draw waveform path with alignment offset
-        juce::Path waveformPath;
-        bool pathStarted = false;
-
-        for (int x = 0; x < area.getWidth(); ++x)
-        {
-            double time = startTime + (x / width) * visibleLength - timeOffset;
-            if (time >= 0.0 && time < length)
-            {
-                int sampleIndex = (int)((time / length) * waveformSize);
-                if (sampleIndex >= 0 && sampleIndex < waveformSize)
-                {
-                    float sample = waveform[sampleIndex];
-                    float y = centerY - (sample * height * 0.4f);
-
-                    if (!pathStarted)
-                    {
-                        waveformPath.startNewSubPath((float)(area.getX() + x), y);
-                        pathStarted = true;
-                    }
-                    else
-                    {
-                        waveformPath.lineTo((float)(area.getX() + x), y);
-                    }
-                }
-            }
-        }
-
-        // Enhanced stroke for playing deck
-        float strokeWidth = isPlaying ? 1.5f : 1.0f;
-        g.strokePath(waveformPath, juce::PathStrokeType(strokeWidth));
-
-        // Draw played portion with different color
-        drawPlayedPortion(g, area, waveform, position, length, startTime, endTime, colour, isPlaying, timeOffset);
-
-        // Draw playback position marker
-        drawPlaybackMarker(g, area, position, startTime, endTime, colour, isPlaying, timeOffset);
-
-        // Draw time grid
-        drawTimeGrid(g, area, startTime, endTime);
-
-        // Draw alignment indicators if in alignment mode
-        if (isAligning)
-        {
-            drawAlignmentIndicators(g, area, deckIndex);
-        }
-    }
-
-    void drawPlayedPortion(juce::Graphics& g, juce::Rectangle<int> area,
-        const std::vector<float>& waveform, double position, double length,
-        double startTime, double endTime, juce::Colour colour, bool isPlaying, double timeOffset = 0.0)
-    {
-        if (!isPlaying || waveform.empty()) return;
-
-        double playedEndTime = juce::jmin(position, endTime + timeOffset);
-        if (playedEndTime <= startTime - timeOffset) return;
-
-        g.setColour(colour.brighter().withAlpha(0.4f));
-
-        float width = (float)area.getWidth();
-        float height = (float)area.getHeight();
-        float centerY = area.getY() + height * 0.5f;
-
-        double visibleLength = endTime - startTime;
-        int waveformSize = (int)waveform.size();
-
-        juce::Path playedPath;
-        bool pathStarted = false;
-
-        double playedStart = juce::jmax(startTime - timeOffset, 0.0);
-        int startPixel = (int)((playedStart + timeOffset - startTime) / visibleLength * width);
-        int endPixel = (int)((playedEndTime + timeOffset - startTime) / visibleLength * width);
-
-        for (int x = startPixel; x <= endPixel && x < area.getWidth(); ++x)
-        {
-            double time = startTime + (x / width) * visibleLength - timeOffset;
-            if (time >= 0.0 && time < length)
-            {
-                int sampleIndex = (int)((time / length) * waveformSize);
-                if (sampleIndex >= 0 && sampleIndex < waveformSize)
-                {
-                    float sample = waveform[sampleIndex];
-                    float y = centerY - (sample * height * 0.4f);
-
-                    if (!pathStarted)
-                    {
-                        playedPath.startNewSubPath((float)(area.getX() + x), y);
-                        pathStarted = true;
-                    }
-                    else
-                    {
-                        playedPath.lineTo((float)(area.getX() + x), y);
-                    }
-                }
-            }
-        }
-
-        g.strokePath(playedPath, juce::PathStrokeType(2.0f));
+        
     }
 
     void drawPlaybackMarker(juce::Graphics& g, juce::Rectangle<int> area,

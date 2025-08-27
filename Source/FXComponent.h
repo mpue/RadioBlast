@@ -312,8 +312,8 @@ public:
 
         // Main title
         g.setColour(juce::Colours::white);
-        g.setFont(juce::Font(24.0f, juce::Font::bold));
-        g.drawText("Audio FX Suite", getLocalBounds().removeFromTop(50),
+        g.setFont(juce::Font(14.0f));
+        g.drawText("Master FX", getLocalBounds().removeFromTop(50),
             juce::Justification::centred);
     }
 

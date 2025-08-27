@@ -126,7 +126,7 @@ MainComponent::MainComponent()
 			[this, deck](WaveformGenerator::WaveformData data) {
 				if (data.isValid)
 				{
-					wave->setWaveformData(deck, data.samples, data.duration);
+					wave->setWaveformData(deck, data);
 				}
 			});
 
@@ -147,7 +147,7 @@ MainComponent::MainComponent()
 			[this, deck](WaveformGenerator::WaveformData data) {
 				if (data.isValid)
 				{
-					wave->setWaveformData(deck, data.samples, data.duration);
+					wave->setWaveformData(deck, data);
 				}
 			});
 
