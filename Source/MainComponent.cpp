@@ -1,4 +1,5 @@
-#include "MainComponent.h"
+Ôªø#include "MainComponent.h"
+#include "FXComponent.h"
 
 //==============================================================================
 MainComponent::MainComponent()
@@ -49,17 +50,20 @@ MainComponent::MainComponent()
 	wave = std::make_unique<DualWaveformComponent>();
 	samplePlayer = std::make_unique<SamplePlayer>();
 
-	// addAndMakeVisible(dock);
-	// addAndMakeVisible(tabDock);
+	fxComponent = std::make_unique<AdvancedFXComponent>();
 	addAndMakeVisible(advancedDock);
 
+	// AudioDeviceManager initialisieren
 	// Add visible components
 	advancedDock.addComponentToNewColumn(leftFileBrowser.get(), 0, 0);
 	advancedDock.addComponentToNewColumn(mixer.get(), 0, 1, 300);
 	advancedDock.addComponentToNewColumn(samplePlayer.get(), 0, 2, 300);
 	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 3);
+
 	advancedDock.addComponentToNewRow(leftPlayList.get(), 1);
-	advancedDock.addComponentToNewColumn(rightPlayList.get(), 1, 1);
+	advancedDock.addComponentToNewColumn(fxComponent.get(), 1, 1);
+	advancedDock.addComponentToNewColumn(rightPlayList.get(), 1, 2);
+
 	advancedDock.addComponentToNewRow(wave.get(), 2);
 
 	juce::PropertiesFile::Options options;
@@ -68,7 +72,6 @@ MainComponent::MainComponent()
 	options.osxLibrarySubFolder = "Application Support";
 	appProperties.setStorageParameters(options);
 
-	// AudioDeviceManager initialisieren
 	audioDeviceManager.initialise(2, 2, nullptr, true);
 
 	// Gespeicherte Audio-Einstellungen laden
@@ -167,6 +170,8 @@ MainComponent::MainComponent()
 
 		};
 
+	updateFXParameters();
+
 	resized();
 }
 
@@ -179,7 +184,7 @@ MainComponent::~MainComponent()
 
 void MainComponent::setupMidiInputs()
 {
-	// Alle verf¸gbaren MIDI Input Devices finden
+	// Alle verf√ºgbaren MIDI Input Devices finden
 	auto midiInputs = juce::MidiInput::getAvailableDevices();
 
 	for (auto& input : midiInputs)
@@ -190,7 +195,7 @@ void MainComponent::setupMidiInputs()
 		}
 	}
 
-	// Callback f¸r Device Manager Changes
+	// Callback f√ºr Device Manager Changes
 	deviceManager.addChangeListener(this);
 }
 
@@ -207,12 +212,12 @@ void MainComponent::cleanupMidiInputs()
 	deviceManager.removeChangeListener(this);
 }
 
-// ChangeListener f¸r Device Manager Changes
+// ChangeListener f√ºr Device Manager Changes
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
 	if (source == &deviceManager)
 	{
-		// MIDI Device Setup aktualisieren wenn sich Ger‰te ‰ndern
+		// MIDI Device Setup aktualisieren wenn sich Ger√§te √§ndern
 		cleanupMidiInputs();
 		setupMidiInputs();
 	}
@@ -351,17 +356,27 @@ void MainComponent::showAbout()
 		"Version 1.0\n"
 		"Built with JUCE Framework\n\n"
 		"Features:\n"
-		"ï Dual deck audio playback\n"
-		"ï MIDI controllable mixer with crossfader\n"
-		"ï File browser and playlist management\n"
-		"ï MIDI Learn functionality",
+		"‚Ä¢ Dual deck audio playback\n"
+		"‚Ä¢ MIDI controllable mixer with crossfader\n"
+		"‚Ä¢ File browser and playlist management\n"
+		"‚Ä¢ MIDI Learn functionality",
 		"OK"
 	);
 }
 
 
 //==============================================================================
-void MainComponent::prepareToPlay(int, double) {}
+void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate)
+{
+	currentSampleRate = sampleRate;
+
+	juce::dsp::ProcessSpec spec;
+	spec.sampleRate = sampleRate;
+	spec.maximumBlockSize = samplesPerBlockExpected;
+	spec.numChannels = 2; // Stereo
+
+	masterFX.prepare(spec);
+}
 void MainComponent::releaseResources() {}
 
 void MainComponent::handleIncomingMidiMessage(MidiInput* source, const MidiMessage& message)
@@ -373,12 +388,12 @@ void MainComponent::handleIncomingMidiMessage(MidiInput* source, const MidiMessa
 
 }
 
-// MainComponent.cpp - erweiterte copyBufferFromSampler Methode
-// Replace the getNextAudioBlock method in MainComponent.cpp with this updated version:
-
 void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill)
 {
 	bufferToFill.clearActiveBufferRegion();
+
+	// === FX PARAMETER UPDATE ===
+	updateFXParameters();
 
 	Sampler* leftSampler = leftFileBrowser->getSampler();
 	Sampler* rightSampler = rightFileBrowser->getSampler();
@@ -394,22 +409,26 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 	const int outNumChans = writableBuffer->getNumChannels();
 	if (!outputData || outNumChans < 2) return;
 
-	// Stereo Buffers f¸r beide Sampler (mit Pitch-Shifting)
+	// Stereo Buffers f√ºr beide Sampler (mit Pitch-Shifting)
 	std::vector<float> leftSamplerL(bufferToFill.numSamples, 0.0f);
 	std::vector<float> leftSamplerR(bufferToFill.numSamples, 0.0f);
 	std::vector<float> rightSamplerL(bufferToFill.numSamples, 0.0f);
 	std::vector<float> rightSamplerR(bufferToFill.numSamples, 0.0f);
 
-	// === NEU: Sample Player Buffers ===
+	// Sample Player Buffers
 	std::vector<float> samplePlayerL(bufferToFill.numSamples, 0.0f);
 	std::vector<float> samplePlayerR(bufferToFill.numSamples, 0.0f);
+
+	// === NEU: Master Mix Buffers f√ºr FX Processing ===
+	std::vector<float> masterMixL(bufferToFill.numSamples, 0.0f);
+	std::vector<float> masterMixR(bufferToFill.numSamples, 0.0f);
 
 	// Level monitoring variables
 	float leftChannelSum = 0.0f;
 	float rightChannelSum = 0.0f;
 	float masterLeftSum = 0.0f;
 	float masterRightSum = 0.0f;
-	float samplePlayerSum = 0.0f; // NEU: f¸r Sample Player Level
+	float samplePlayerSum = 0.0f;
 
 	// Generate sampler outputs
 	if (leftSampler && leftSampler->isPlaying()) {
@@ -422,27 +441,25 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 			bufferToFill.numSamples, mixer->getRightChannelGain(), rightPitch);
 	}
 
-	// === NEU: Sample Player Output generieren ===
+	// Sample Player Output generieren
 	if (samplePlayer && samplePlayer->isAnySamplePlaying()) {
 		samplePlayer->generateSampleOutput(samplePlayerL, samplePlayerR,
-			bufferToFill.numSamples, 1.0f); // Gain kann ¸ber UI gesteuert werden
+			bufferToFill.numSamples, 1.0f);
 	}
 
-	// Output Routing with level monitoring
+	// === AUDIO ROUTING ZUM MASTER MIX ===
 	for (int j = 0; j < bufferToFill.numSamples; ++j) {
 
 		// Calculate channel levels before routing (for deck meters)
 		float leftChannelLevel = std::sqrt(leftSamplerL[j] * leftSamplerL[j] + leftSamplerR[j] * leftSamplerR[j]);
 		float rightChannelLevel = std::sqrt(rightSamplerL[j] * rightSamplerL[j] + rightSamplerR[j] * rightSamplerR[j]);
-
-		// === NEU: Sample Player Level berechnen ===
 		float samplePlayerLevel = std::sqrt(samplePlayerL[j] * samplePlayerL[j] + samplePlayerR[j] * samplePlayerR[j]);
 
 		leftChannelSum += leftChannelLevel * leftChannelLevel;
 		rightChannelSum += rightChannelLevel * rightChannelLevel;
-		samplePlayerSum += samplePlayerLevel * samplePlayerLevel; // NEU
+		samplePlayerSum += samplePlayerLevel * samplePlayerLevel;
 
-		// === LEFT DECK ROUTING ===
+		// === LEFT DECK ROUTING ZUM MASTER MIX ===
 		auto leftDest = mixer->getLeftChannelDestination();
 
 		if (mixer->isLeftChannelRoutedToMaster()) {
@@ -450,33 +467,19 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 
 			switch (leftDest) {
 			case MixerComponent::OutputDestination::MasterLeft:
-				if (outNumChans > 0) {
-					float outputL = leftSamplerL[j] * masterGain;
-					float outputR = leftSamplerR[j] * masterGain;
-					outputData[0][j] += outputL;
-					if (outNumChans > 1) outputData[1][j] += outputR;
-
-					// Track master levels
-					masterLeftSum += outputL * outputL;
-					masterRightSum += outputR * outputR;
-				}
+				masterMixL[j] += leftSamplerL[j] * masterGain;
+				masterMixR[j] += leftSamplerR[j] * masterGain;
 				break;
 			case MixerComponent::OutputDestination::MasterRight:
-				if (outNumChans > 1) {
-					float monoOutput = (leftSamplerL[j] + leftSamplerR[j]) * masterGain * 0.5f;
-					outputData[1][j] += monoOutput;
-					masterRightSum += monoOutput * monoOutput;
-				}
-				break;
+			{
+				float monoOutput = (leftSamplerL[j] + leftSamplerR[j]) * masterGain * 0.5f;
+				masterMixR[j] += monoOutput;
+			}
+			break;
 			}
 		}
 
-		if (mixer->isLeftChannelRoutedToCue()) {
-			if (outNumChans > 2) outputData[2][j] += leftSamplerL[j];
-			if (outNumChans > 3) outputData[3][j] += leftSamplerR[j];
-		}
-
-		// === RIGHT DECK ROUTING ===
+		// === RIGHT DECK ROUTING ZUM MASTER MIX ===
 		auto rightDest = mixer->getRightChannelDestination();
 
 		if (mixer->isRightChannelRoutedToMaster()) {
@@ -484,72 +487,82 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 
 			switch (rightDest) {
 			case MixerComponent::OutputDestination::MasterLeft:
-				if (outNumChans > 0) {
-					float monoOutput = (rightSamplerL[j] + rightSamplerR[j]) * masterGain * 0.5f;
-					outputData[0][j] += monoOutput;
-					masterLeftSum += monoOutput * monoOutput;
-				}
-				break;
+			{
+				float monoOutput = (rightSamplerL[j] + rightSamplerR[j]) * masterGain * 0.5f;
+				masterMixL[j] += monoOutput;
+			}
+			break;
 			case MixerComponent::OutputDestination::MasterRight:
-				if (outNumChans > 0) {
-					float outputL = rightSamplerL[j] * masterGain;
-					float outputR = rightSamplerR[j] * masterGain;
-					outputData[0][j] += outputL;
-					if (outNumChans > 1) outputData[1][j] += outputR;
-
-					// Track master levels
-					masterLeftSum += outputL * outputL;
-					masterRightSum += outputR * outputR;
-				}
+				masterMixL[j] += rightSamplerL[j] * masterGain;
+				masterMixR[j] += rightSamplerR[j] * masterGain;
 				break;
 			}
+		}
+
+		// === Sample Player zum Master Mix hinzuf√ºgen ===
+		masterMixL[j] += samplePlayerL[j];
+		masterMixR[j] += samplePlayerR[j];
+
+		// === CUE ROUTING (bypassed FX) ===
+		if (mixer->isLeftChannelRoutedToCue()) {
+			if (outNumChans > 2) outputData[2][j] += leftSamplerL[j];
+			if (outNumChans > 3) outputData[3][j] += leftSamplerR[j];
 		}
 
 		if (mixer->isRightChannelRoutedToCue()) {
 			if (outNumChans > 2) outputData[2][j] += rightSamplerL[j];
 			if (outNumChans > 3) outputData[3][j] += rightSamplerR[j];
 		}
+	}
 
-		// === NEU: Sample Player direkt zum Master Output hinzuf¸gen ===
-		// Sample Player wird immer auf Master gemischt (kann sp‰ter erweitert werden)
+	// === üéõÔ∏è MASTER FX PROCESSING - HIER PASSIERT DIE MAGIE! ===
+	processFXChain(masterFX, masterMixL, masterMixR, bufferToFill.numSamples);
+
+	// === Final Output zu Hardware ===
+	for (int j = 0; j < bufferToFill.numSamples; ++j) {
 		if (outNumChans > 0) {
-			outputData[0][j] += samplePlayerL[j];
-			masterLeftSum += samplePlayerL[j] * samplePlayerL[j];
+			outputData[0][j] = masterMixL[j];
+			masterLeftSum += masterMixL[j] * masterMixL[j];
 		}
 		if (outNumChans > 1) {
-			outputData[1][j] += samplePlayerR[j];
-			masterRightSum += samplePlayerR[j] * samplePlayerR[j];
+			outputData[1][j] = masterMixR[j];
+			masterRightSum += masterMixR[j] * masterMixR[j];
 		}
 	}
 
-	// Calculate RMS levels for meters
+	// === LEVEL METER UPDATES ===
 	if (bufferToFill.numSamples > 0)
 	{
 		leftChannelRMS = std::sqrt(leftChannelSum / bufferToFill.numSamples);
 		rightChannelRMS = std::sqrt(rightChannelSum / bufferToFill.numSamples);
 		masterLeftRMS = std::sqrt(masterLeftSum / bufferToFill.numSamples);
 		masterRightRMS = std::sqrt(masterRightSum / bufferToFill.numSamples);
-
-		// === NEU: Sample Player RMS Level ===
 		samplePlayerRMS = std::sqrt(samplePlayerSum / bufferToFill.numSamples);
 
-		// Update level meters on message thread
-		juce::MessageManager::callAsync([this]()
+		// === FX COMPONENT LEVEL UPDATES ===
+		juce::AudioBuffer<float> levelBuffer(2, bufferToFill.numSamples);
+		for (int i = 0; i < bufferToFill.numSamples; ++i)
+		{
+			levelBuffer.setSample(0, i, masterMixL[i]);
+			levelBuffer.setSample(1, i, masterMixR[i]);
+		}
+
+		// === NEU: Level Updates an Mixer weiterleiten ===
+		juce::MessageManager::callAsync([this, leftChannelRMS = leftChannelRMS, rightChannelRMS = rightChannelRMS,
+			masterLeftRMS = masterLeftRMS, masterRightRMS = masterRightRMS,
+			samplePlayerRMS = samplePlayerRMS]() mutable
 			{
+				// Update bestehende Mixer Level Meters
 				if (mixer)
 				{
-					mixer->updateChannelLevels(0, leftChannelRMS, rightChannelRMS);
-					mixer->updateChannelLevels(1, leftChannelRMS, rightChannelRMS);
-					mixer->updateTrueMasterLevels(masterLeftRMS, masterRightRMS);
-
-					// === NEU: Sample Player Levels an UI weiterleiten (optional) ===
-					// Hier kˆnnen Sie die Sample Player Levels an Ihre UI weiterleiten
-					// z.B. mixer->updateSamplePlayerLevels(samplePlayerRMS);
+					mixer->updateChannelLevels(0, leftChannelRMS, rightChannelRMS);   // Left deck
+					mixer->updateChannelLevels(1, leftChannelRMS, rightChannelRMS);   // Right deck (beide gleich f√ºr jetzt)
+					mixer->updateTrueMasterLevels(masterLeftRMS, masterRightRMS);     // Master output levels
 				}
 			});
 	}
 }
-// Hilfsfunktion f¸r Pitch-Shifting
+// Hilfsfunktion f√ºr Pitch-Shifting
 void MainComponent::generateSamplerOutputWithPitch(Sampler* sampler,
 	std::vector<float>& outputL,
 	std::vector<float>& outputR,
@@ -572,7 +585,7 @@ void MainComponent::generateSamplerOutputWithPitch(Sampler* sampler,
 		else {
 			// Pitch-Shifting mit korrekter Interpolation
 
-			// Neue Samples holen wenn nˆtig
+			// Neue Samples holen wenn n√∂tig
 			while (phase >= 1.0) {
 				prevSampleL = currentSampleL;
 				prevSampleR = currentSampleR;
@@ -597,7 +610,7 @@ void MainComponent::generateSamplerOutputWithPitch(Sampler* sampler,
 			outputL[i] = (prevSampleL + fracPart * (currentSampleL - prevSampleL)) * gain;
 			outputR[i] = (prevSampleR + fracPart * (currentSampleR - prevSampleR)) * gain;
 
-			// Phase f¸r n‰chstes Sample erhˆhen
+			// Phase f√ºr n√§chstes Sample erh√∂hen
 			phase += pitch;
 		}
 	}
@@ -615,10 +628,10 @@ void MainComponent::resized()
 {
 	auto area = getLocalBounds();
 
-	// Platz f¸r Men¸leiste reservieren
+	// Platz f√ºr Men√ºleiste reservieren
 	if (menuBar)
 	{
-		auto menuArea = area.removeFromTop(24); // Men¸ ist typisch 24px hoch
+		auto menuArea = area.removeFromTop(24); // Men√º ist typisch 24px hoch
 		menuBar->setBounds(menuArea);
 	}
 
@@ -626,4 +639,164 @@ void MainComponent::resized()
 	// tabDock.setBounds(area.reduced(4));
 	advancedDock.setBounds(area.reduced(4));
 
+}
+
+
+void MainComponent::updateFXParameters()
+{
+	// Parameter direkt von UI-Komponenten lesen (einfacher Weg ohne AudioProcessorValueTreeState)
+	updateFilterParameters(masterFX);
+	updateEQParameters(masterFX);
+	updateChorusParameters(masterFX);
+	updateReverbParameters(masterFX);
+
+	// Master Volume direkt vom Knob lesen
+	if (fxComponent)
+		masterFX.masterVolume = (float)fxComponent->masterVolumeKnob.getValue();
+}
+
+void MainComponent::updateFilterParameters(FXChain& fx, const juce::String& prefix)
+{
+	if (!fxComponent) return;
+
+	auto cutoff = (float)fxComponent->filterSection.cutoffKnob.getValue();
+	auto resonance = (float)fxComponent->filterSection.resonanceKnob.getValue();
+	auto drive = (float)fxComponent->filterSection.driveKnob.getValue();
+	auto type = fxComponent->filterSection.typeCombo.getSelectedId() - 1; // ComboBox IDs starten bei 1
+	fx.filterBypass = fxComponent->filterBypass.getToggleState();
+
+	for (auto& filter : fx.filters)
+	{
+		filter.setCutoffFrequency(cutoff);
+		filter.setResonance(resonance);
+
+		switch (type)
+		{
+		case 0: filter.setType(juce::dsp::StateVariableTPTFilterType::lowpass); break;
+		case 1: filter.setType(juce::dsp::StateVariableTPTFilterType::highpass); break;
+		case 2: filter.setType(juce::dsp::StateVariableTPTFilterType::bandpass); break;
+		// case 3: filter.setType(juce::dsp::StateVariableTPTFilterType::notch); break;
+		default: filter.setType(juce::dsp::StateVariableTPTFilterType::lowpass); break;
+		}
+	}
+}
+
+void MainComponent::updateEQParameters(FXChain& fx, const juce::String& prefix)
+{
+	if (!fxComponent) return;
+
+	auto lowGain = juce::Decibels::decibelsToGain((float)fxComponent->eqSection.lowKnob.getValue());
+	auto midGain = juce::Decibels::decibelsToGain((float)fxComponent->eqSection.midKnob.getValue());
+	auto highGain = juce::Decibels::decibelsToGain((float)fxComponent->eqSection.highKnob.getValue());
+	auto lowFreq = (float)fxComponent->eqSection.lowFreqKnob.getValue();
+	auto highFreq = (float)fxComponent->eqSection.highFreqKnob.getValue();
+	fx.eqBypass = fxComponent->eqBypass.getToggleState();
+
+	// Stereo EQ - beide Kan√§le gleich einstellen
+	for (int i = 0; i < 2; ++i)
+	{
+		fx.lowShelfFilter[i].coefficients = juce::dsp::IIR::Coefficients<float>::makeLowShelf(
+			currentSampleRate, lowFreq, 0.707f, lowGain);
+		fx.peakingFilter[i].coefficients = juce::dsp::IIR::Coefficients<float>::makePeakFilter(
+			currentSampleRate, 1000.0f, 1.0f, midGain);
+		fx.highShelfFilter[i].coefficients = juce::dsp::IIR::Coefficients<float>::makeHighShelf(
+			currentSampleRate, highFreq, 0.707f, highGain);
+	}
+}
+
+void MainComponent::updateChorusParameters(FXChain& fx, const juce::String& prefix)
+{
+	if (!fxComponent) return;
+
+	auto rate = (float)fxComponent->chorusSection.rateKnob.getValue();
+	auto depth = (float)fxComponent->chorusSection.depthKnob.getValue();
+	auto feedback = (float)fxComponent->chorusSection.feedbackKnob.getValue();
+	auto mix = (float)fxComponent->chorusSection.mixKnob.getValue();
+	fx.chorusBypass = fxComponent->chorusBypass.getToggleState();
+
+	fx.chorus.setRate(rate);
+	fx.chorus.setDepth(depth);
+	fx.chorus.setFeedback(feedback);
+	fx.chorus.setMix(mix);
+	fx.chorus.setCentreDelay(7.0f);
+}
+
+void MainComponent::updateReverbParameters(FXChain& fx, const juce::String& prefix)
+{
+	if (!fxComponent) return;
+
+	juce::dsp::Reverb::Parameters reverbParams;
+	reverbParams.roomSize = (float)fxComponent->reverbSection.roomSizeKnob.getValue();
+	reverbParams.damping = (float)fxComponent->reverbSection.dampingKnob.getValue();
+	reverbParams.wetLevel = (float)fxComponent->reverbSection.wetKnob.getValue();
+	reverbParams.dryLevel = (float)fxComponent->reverbSection.dryKnob.getValue();
+	reverbParams.width = (float)fxComponent->reverbSection.widthKnob.getValue();
+	reverbParams.freezeMode = 0.0f;
+
+	fx.reverbBypass = fxComponent->reverbBypass.getToggleState();
+	fx.reverb.setParameters(reverbParams);
+}
+
+void MainComponent::processFXChain(FXChain& fx, std::vector<float>& leftChannel, std::vector<float>& rightChannel, int numSamples)
+{
+	// Create audio buffer from vectors
+	juce::AudioBuffer<float> buffer(2, numSamples);
+
+	// Copy input data
+	for (int i = 0; i < numSamples; ++i)
+	{
+		buffer.setSample(0, i, leftChannel[i]);
+		buffer.setSample(1, i, rightChannel[i]);
+	}
+
+	// Process FX Chain
+	juce::dsp::AudioBlock<float> block(buffer);
+	juce::dsp::ProcessContextReplacing<float> context(block);
+
+	// Filter (bereits Stereo-f√§hig)
+	if (!fx.filterBypass)
+	{
+		for (auto& filter : fx.filters)
+			filter.process(context);
+	}
+
+	// EQ - Stereo Processing
+	if (!fx.eqBypass)
+	{
+		// Separate Channels f√ºr EQ
+		for (int channel = 0; channel < 2; ++channel)
+		{
+			for (int sample = 0; sample < numSamples; ++sample)
+			{
+				float input = buffer.getSample(channel, sample);
+
+				// Chain: Low ‚Üí Peak ‚Üí High
+				float output = fx.lowShelfFilter[channel].processSample(input);
+				output = fx.peakingFilter[channel].processSample(output);
+				output = fx.highShelfFilter[channel].processSample(output);
+
+				buffer.setSample(channel, sample, output);
+			}
+		}
+	}
+
+	// Chorus (bereits Stereo-f√§hig)
+	if (!fx.chorusBypass)
+		fx.chorus.process(context);
+
+	// Reverb (bereits Stereo-f√§hig)
+	if (!fx.reverbBypass)
+		fx.reverb.process(context);
+
+	// Master Volume
+	auto masterGain = juce::Decibels::decibelsToGain(fx.masterVolume);
+	if (masterGain != 1.0f)
+		block.multiplyBy(masterGain);
+
+	// Copy back to vectors
+	for (int i = 0; i < numSamples; ++i)
+	{
+		leftChannel[i] = buffer.getSample(0, i);
+		rightChannel[i] = buffer.getSample(1, i);
+	}
 }

@@ -10,6 +10,8 @@
 #include "WaveformGenerator.h"
 #include "DualWavefromComponent.h"
 #include "SamplePlayer.h"
+#include "FXComponent.h"
+#include "FXUtilities.h"
 
 //==============================================================================
 /*
@@ -28,6 +30,66 @@ public:
     //==============================================================================
     MainComponent();
     ~MainComponent() override;
+
+    // === FX DSP CHAIN ===
+    struct FXChain
+    {
+        // Filter
+        std::array<juce::dsp::StateVariableTPTFilter<float>, 2> filters;
+        bool filterBypass = false;
+
+        // EQ - Separate Filter für Stereo
+        std::array<juce::dsp::IIR::Filter<float>, 2> lowShelfFilter, peakingFilter, highShelfFilter;
+        bool eqBypass = false;
+
+        // Chorus
+        juce::dsp::Chorus<float> chorus;
+        bool chorusBypass = false;
+
+        // Reverb
+        juce::dsp::Reverb reverb;
+        bool reverbBypass = false;
+
+        // Master Volume
+        float masterVolume = 0.0f; // dB
+
+        void prepare(const juce::dsp::ProcessSpec& spec)
+        {
+            for (auto& filter : filters)
+            {
+                filter.prepare(spec);
+                filter.reset();
+            }
+
+            // EQ - Stereo vorbereiten
+            for (int i = 0; i < 2; ++i)
+            {
+                lowShelfFilter[i].prepare(spec);
+                peakingFilter[i].prepare(spec);
+                highShelfFilter[i].prepare(spec);
+            }
+
+            chorus.prepare(spec);
+            reverb.prepare(spec);
+        }
+
+        void reset()
+        {
+            for (auto& filter : filters)
+                filter.reset();
+
+            // EQ - Stereo reset
+            for (int i = 0; i < 2; ++i)
+            {
+                lowShelfFilter[i].reset();
+                peakingFilter[i].reset();
+                highShelfFilter[i].reset();
+            }
+
+            chorus.reset();
+            reverb.reset();
+        }
+    };
 
     juce::StringArray getMenuBarNames() override;
     juce::PopupMenu getMenuForIndex(int topLevelMenuIndex, const juce::String& menuName) override;
@@ -67,6 +129,13 @@ public:
             mixer->analyzeBPMFromFile(audioFile, isLeftDeck);
         }
     }
+
+    void updateFXParameters();
+    void processFXChain(FXChain& fx, std::vector<float>& leftChannel, std::vector<float>& rightChannel, int numSamples);
+    void updateFilterParameters(FXChain& fx, const juce::String& prefix = "master");
+    void updateEQParameters(FXChain& fx, const juce::String& prefix = "master");
+    void updateChorusParameters(FXChain& fx, const juce::String& prefix = "master");
+    void updateReverbParameters(FXChain& fx, const juce::String& prefix = "master");
 
 private:
     //==============================================================================
@@ -125,6 +194,17 @@ private:
     float masterRightRMS = 0.0f;
     float samplePlayerRMS = 0.0f;
 
+	double currentSampleRate = 44100.0; 
+
+
+    std::unique_ptr<AdvancedFXComponent> fxComponent;
+    std::unique_ptr<juce::AudioProcessorValueTreeState> fxParameters;
+
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAttachments;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> buttonAttachments;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> comboAttachments;
+
+    FXChain masterFX; // Master FX Chain für alle Signale
 
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
