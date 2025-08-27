@@ -15,6 +15,7 @@
 //==============================================================================
 class SamplePlayer : public juce::Component,
     public juce::FileDragAndDropTarget,
+    public juce::DragAndDropTarget,
     public juce::Button::Listener,
     public juce::ComboBox::Listener
 {
@@ -46,6 +47,11 @@ public:
             isPlaying = false;
             currentPosition = 0;
         }
+
+        bool isEmpty() const
+        {
+            return buffer.getNumSamples() == 0;
+        }
     };
 
     //==============================================================================
@@ -56,6 +62,9 @@ public:
 
         setupUI();
         formatManager.registerBasicFormats();
+
+        // Enable drag and drop for internal operations
+        setInterceptsMouseClicks(true, true);
     }
 
     ~SamplePlayer() override = default;
@@ -63,12 +72,22 @@ public:
     //==============================================================================
     void paint(juce::Graphics& g) override
     {
-        g.fillAll(Colour(0xff333333));
+        g.fillAll(Colour(0xff222222));
 
         g.setColour(juce::Colours::white);
         g.setFont(16.0f);
         g.drawText("Sample Player", getLocalBounds().removeFromTop(30),
             juce::Justification::centred);
+
+        // Draw drag highlight if dragging
+        if (isDraggingInternal && dragTargetSlot >= 0)
+        {
+            auto slotBounds = getSlotBounds(dragTargetSlot);
+            g.setColour(juce::Colours::yellow.withAlpha(0.3f));
+            g.fillRect(slotBounds);
+            g.setColour(juce::Colours::yellow);
+            g.drawRect(slotBounds, 2);
+        }
     }
 
     void resized() override
@@ -92,13 +111,73 @@ public:
             modeComboBoxes[i]->setBounds(slotArea.removeFromLeft(100));
             slotArea.removeFromLeft(5);
 
-            // File name label
+            // File name label (this will be our drag source)
             fileNameLabels[i]->setBounds(slotArea);
         }
     }
 
     //==============================================================================
-    // FileDragAndDropTarget implementation
+    // Mouse handling for internal drag operations
+    void mouseDown(const juce::MouseEvent& e) override
+    {
+        if (e.mods.isLeftButtonDown())
+        {
+            dragStartSlot = findSlotAtPosition(e.getPosition().getY());
+
+            if (dragStartSlot >= 0 && dragStartSlot < 8 &&
+                !sampleSlots[dragStartSlot].isEmpty())
+            {
+                isDragPossible = true;
+                dragStartPosition = e.getPosition();
+            }
+        }
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override
+    {
+        if (isDragPossible && !isDraggingInternal)
+        {
+            // Start dragging if mouse moved enough
+            if (e.getPosition().getDistanceFrom(dragStartPosition) > 10)
+            {
+                startInternalDrag(dragStartSlot);
+            }
+        }
+
+        if (isDraggingInternal)
+        {
+            // Update drag target
+            int newTarget = findSlotAtPosition(e.getPosition().getY());
+            if (newTarget != dragTargetSlot)
+            {
+                dragTargetSlot = newTarget;
+                repaint();
+            }
+        }
+    }
+
+    void mouseUp(const juce::MouseEvent& e) override
+    {
+        if (isDraggingInternal)
+        {
+            // Complete the drag operation
+            if (dragTargetSlot >= 0 && dragTargetSlot < 8 &&
+                dragTargetSlot != dragStartSlot)
+            {
+                swapSamples(dragStartSlot, dragTargetSlot);
+            }
+        }
+
+        // Reset drag state
+        isDragPossible = false;
+        isDraggingInternal = false;
+        dragStartSlot = -1;
+        dragTargetSlot = -1;
+        repaint();
+    }
+
+    //==============================================================================
+    // FileDragAndDropTarget implementation (external files)
     bool isInterestedInFileDrag(const juce::StringArray& files) override
     {
         for (const auto& file : files)
@@ -110,19 +189,111 @@ public:
         return false;
     }
 
-    void fileDragEnter(const juce::StringArray&, int, int) override {}
-    void fileDragMove(const juce::StringArray&, int, int) override {}
-    void fileDragExit(const juce::StringArray&) override {}
+    void fileDragEnter(const juce::StringArray&, int, int) override
+    {
+        isExternalDragActive = true;
+        repaint();
+    }
+
+    void fileDragMove(const juce::StringArray&, int x, int y) override
+    {
+        externalDragTargetSlot = findSlotAtPosition(y);
+        repaint();
+    }
+
+    void fileDragExit(const juce::StringArray&) override
+    {
+        isExternalDragActive = false;
+        externalDragTargetSlot = -1;
+        repaint();
+    }
 
     void filesDropped(const juce::StringArray& files, int x, int y) override
     {
-        // Find which slot the file was dropped on
+        isExternalDragActive = false;
         int slotIndex = findSlotAtPosition(y);
 
         if (slotIndex >= 0 && slotIndex < 8 && !files.isEmpty())
         {
             loadSampleIntoSlot(files[0], slotIndex);
         }
+
+        externalDragTargetSlot = -1;
+        repaint();
+    }
+
+    //==============================================================================
+    // DragAndDropTarget implementation (internal drag from other components)
+    bool isInterestedInDragSource(const SourceDetails& dragSourceDetails) override
+    {
+        // Check if it's an audio file from another component
+        if (dragSourceDetails.description.isString())
+        {
+            juce::String desc = dragSourceDetails.description.toString();
+            return desc.startsWith("audiofile:") || isAudioFile(desc);
+        }
+        else if (dragSourceDetails.description.isArray())
+        {
+            auto* array = dragSourceDetails.description.getArray();
+            if (array && array->size() > 0)
+            {
+                juce::String firstItem = (*array)[0].toString();
+                return isAudioFile(firstItem);
+            }
+        }
+
+        return false;
+    }
+
+    void itemDragEnter(const SourceDetails& dragSourceDetails) override
+    {
+        isExternalDragActive = true;
+        repaint();
+    }
+
+    void itemDragMove(const SourceDetails& dragSourceDetails) override
+    {
+        externalDragTargetSlot = findSlotAtPosition(dragSourceDetails.localPosition.getY());
+        repaint();
+    }
+
+    void itemDragExit(const SourceDetails& dragSourceDetails) override
+    {
+        isExternalDragActive = false;
+        externalDragTargetSlot = -1;
+        repaint();
+    }
+
+    void itemDropped(const SourceDetails& dragSourceDetails) override
+    {
+        isExternalDragActive = false;
+        int slotIndex = findSlotAtPosition(dragSourceDetails.localPosition.getY());
+
+        if (slotIndex >= 0 && slotIndex < 8)
+        {
+            juce::String filePath;
+
+            if (dragSourceDetails.description.isString())
+            {
+                filePath = dragSourceDetails.description.toString();
+                if (filePath.startsWith("audiofile:"))
+                    filePath = filePath.substring(10); // Remove "audiofile:" prefix
+            }
+            else if (dragSourceDetails.description.isArray())
+            {
+                auto* array = dragSourceDetails.description.getArray();
+                if (array && array->size() > 0)
+                    filePath = (*array)[0].toString();
+            }
+
+            if (filePath.isNotEmpty())
+            {
+                loadSampleIntoSlot(filePath, slotIndex);
+            }
+        }
+
+        externalDragTargetSlot = -1;
+        repaint();
     }
 
     //==============================================================================
@@ -152,6 +323,64 @@ public:
                 break;
             }
         }
+    }
+
+    //==============================================================================
+    // Sample management functions
+    void copySample(int fromSlot, int toSlot)
+    {
+        if (fromSlot < 0 || fromSlot >= 8 || toSlot < 0 || toSlot >= 8)
+            return;
+
+        if (sampleSlots[fromSlot].isEmpty())
+            return;
+
+        auto& source = sampleSlots[fromSlot];
+        auto& target = sampleSlots[toSlot];
+
+        // Stop target slot if playing
+        target.stop();
+
+        // Copy buffer and properties
+        target.buffer = source.buffer;
+        target.fileName = source.fileName + " (Copy)";
+        target.playMode = source.playMode;
+        target.gain = source.gain;
+
+        // Update UI
+        fileNameLabels[toSlot]->setText(target.fileName, juce::dontSendNotification);
+        modeComboBoxes[toSlot]->setSelectedId(static_cast<int>(target.playMode) + 1);
+        updateButtonStates();
+    }
+
+    void moveSample(int fromSlot, int toSlot)
+    {
+        if (fromSlot < 0 || fromSlot >= 8 || toSlot < 0 || toSlot >= 8 || fromSlot == toSlot)
+            return;
+
+        // Swap the samples
+        swapSamples(fromSlot, toSlot);
+
+        // Clear the source slot
+        clearSlot(fromSlot);
+    }
+
+    void clearSlot(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= 8)
+            return;
+
+        auto& slot = sampleSlots[slotIndex];
+        slot.stop();
+        slot.buffer.clear();
+        slot.fileName.clear();
+        slot.gain = 1.0f;
+        slot.playMode = PlayMode::OneShot;
+
+        // Update UI
+        fileNameLabels[slotIndex]->setText("Drop audio file here...", juce::dontSendNotification);
+        modeComboBoxes[slotIndex]->setSelectedId(1);
+        updateButtonStates();
     }
 
     //==============================================================================
@@ -192,7 +421,6 @@ public:
         }
     }
 
-    // Trigger specific sample
     void triggerSample(int slotIndex)
     {
         if (slotIndex >= 0 && slotIndex < sampleSlots.size())
@@ -207,7 +435,6 @@ public:
         }
     }
 
-    // Check if any sample is playing
     bool isAnySamplePlaying() const
     {
         for (const auto& slot : sampleSlots)
@@ -227,6 +454,15 @@ private:
     std::array<std::unique_ptr<juce::ComboBox>, 8> modeComboBoxes;
     std::array<std::unique_ptr<juce::Label>, 8> fileNameLabels;
 
+    // Drag and Drop state
+    bool isDragPossible = false;
+    bool isDraggingInternal = false;
+    bool isExternalDragActive = false;
+    int dragStartSlot = -1;
+    int dragTargetSlot = -1;
+    int externalDragTargetSlot = -1;
+    juce::Point<int> dragStartPosition;
+
     //==============================================================================
     void setupUI()
     {
@@ -244,12 +480,13 @@ private:
             modeComboBoxes[i]->addItem("Loop Backward", 3);
             modeComboBoxes[i]->setSelectedId(1);
             modeComboBoxes[i]->addListener(this);
+		    
             addAndMakeVisible(*modeComboBoxes[i]);
 
             // File name labels
             fileNameLabels[i] = std::make_unique<juce::Label>();
             fileNameLabels[i]->setText("Drop audio file here...", juce::dontSendNotification);
-            fileNameLabels[i]->setColour(juce::Label::backgroundColourId, juce::Colours::black);
+            fileNameLabels[i]->setColour(juce::Label::backgroundColourId, juce::Colour(0xff333333));
             fileNameLabels[i]->setColour(juce::Label::textColourId, juce::Colours::white);
             fileNameLabels[i]->setJustificationType(juce::Justification::centredLeft);
             addAndMakeVisible(*fileNameLabels[i]);
@@ -257,16 +494,92 @@ private:
     }
 
     //==============================================================================
+    juce::Rectangle<int> getSlotBounds(int slotIndex) const
+    {
+        if (slotIndex < 0 || slotIndex >= 8)
+            return {};
+
+        auto area = getLocalBounds();
+        area.removeFromTop(35);
+
+        const int slotHeight = 60;
+        const int margin = 5;
+
+        return area.removeFromTop(slotHeight * (slotIndex + 1))
+            .removeFromBottom(slotHeight)
+            .reduced(margin, margin);
+    }
+
     int findSlotAtPosition(int y)
     {
         auto area = getLocalBounds();
         area.removeFromTop(35);
 
         const int slotHeight = 60 + 10; // including margin
-        return juce::jmin(7, y / slotHeight);
+        return juce::jlimit(0, 7, y / slotHeight);
     }
 
     //==============================================================================
+    void startInternalDrag(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= 8 || sampleSlots[slotIndex].isEmpty())
+            return;
+
+        isDraggingInternal = true;
+        dragStartSlot = slotIndex;
+
+        // Visual feedback
+        repaint();
+    }
+
+    void swapSamples(int slot1, int slot2)
+    {
+        if (slot1 < 0 || slot1 >= 8 || slot2 < 0 || slot2 >= 8 || slot1 == slot2)
+            return;
+
+        // Stop both slots
+        sampleSlots[slot1].stop();
+        sampleSlots[slot2].stop();
+
+        // Swap the sample data
+        std::swap(sampleSlots[slot1], sampleSlots[slot2]);
+
+        // Update UI for both slots
+        updateSlotUI(slot1);
+        updateSlotUI(slot2);
+        updateButtonStates();
+    }
+
+    void updateSlotUI(int slotIndex)
+    {
+        if (slotIndex < 0 || slotIndex >= 8)
+            return;
+
+        const auto& slot = sampleSlots[slotIndex];
+
+        if (slot.isEmpty())
+        {
+            fileNameLabels[slotIndex]->setText("Drop audio file here...", juce::dontSendNotification);
+        }
+        else
+        {
+            fileNameLabels[slotIndex]->setText(slot.fileName, juce::dontSendNotification);
+        }
+
+        modeComboBoxes[slotIndex]->setSelectedId(static_cast<int>(slot.playMode) + 1);
+    }
+
+    //==============================================================================
+    bool isAudioFile(const juce::String& filename) const
+    {
+        return filename.endsWithIgnoreCase(".wav") ||
+            filename.endsWithIgnoreCase(".aiff") ||
+            filename.endsWithIgnoreCase(".mp3") ||
+            filename.endsWithIgnoreCase(".flac") ||
+            filename.endsWithIgnoreCase(".ogg") ||
+            filename.endsWithIgnoreCase(".m4a");
+    }
+
     void loadSampleIntoSlot(const juce::String& filePath, int slotIndex)
     {
         if (slotIndex < 0 || slotIndex >= sampleSlots.size())
@@ -295,7 +608,7 @@ private:
         slot.fileName = audioFile.getFileNameWithoutExtension();
 
         // Update UI
-        fileNameLabels[slotIndex]->setText(slot.fileName, juce::dontSendNotification);
+        updateSlotUI(slotIndex);
         updateButtonStates();
     }
 

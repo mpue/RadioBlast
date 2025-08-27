@@ -512,16 +512,18 @@ public:
         g.setColour(lightBackground);
         g.drawRoundedRectangle(bounds.reduced(0.5f), cornerSize, 1.0f);
 
-        // Pfeil
-        auto arrowBounds = juce::Rectangle<float>(buttonX, buttonY, buttonW, buttonH).reduced(4.0f);
-        g.setColour(primaryBlue);
+        //// Pfeil
+        //auto arrowBounds = juce::Rectangle<float>(buttonX, buttonY, buttonW, buttonH).reduced(4.0f);
+        //g.setColour(primaryBlue);
 
-        juce::Path arrow;
-        arrow.addTriangle(arrowBounds.getX(), arrowBounds.getY(),
-            arrowBounds.getRight(), arrowBounds.getY(),
-            arrowBounds.getCentreX(), arrowBounds.getBottom());
-        g.fillPath(arrow);
+        //juce::Path arrow;
+        //arrow.addTriangle(arrowBounds.getX(), arrowBounds.getY(),
+        //    arrowBounds.getRight(), arrowBounds.getY(),
+        //    arrowBounds.getCentreX(), arrowBounds.getBottom());
+        //g.fillPath(arrow);
     }
+
+
 
     // === FONT CUSTOMIZATION ===
     juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override
