@@ -651,7 +651,7 @@ void PlaylistComponent::loadPlaylistDialog()
     }
 
     // FIX 5: Use shared_ptr for load dialog too
-    auto chooser = std::make_shared<juce::FileChooser>("Playlist laden...",
+    auto chooser = std::make_shared<juce::FileChooser>("Load playlist...",
         getDefaultPlaylistDirectory(),
         "*.djpl;*.m3u;*.pls");
 
@@ -663,16 +663,9 @@ void PlaylistComponent::loadPlaylistDialog()
         if (results.size() > 0)
         {
             auto file = results.getFirst();
-            if (loadPlaylist(file))
-            {
-                juce::AlertWindow::showMessageBoxAsync(
-                    juce::AlertWindow::InfoIcon,
-                    "Playlist geladen",
-                    "Playlist erfolgreich geladen: " + file.getFileName()
-                );
-            }
+            loadPlaylist(file);
         }
-        });
+       });
 }
 
 

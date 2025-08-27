@@ -12,7 +12,8 @@
 #include "SamplePlayer.h"
 #include "FXComponent.h"
 #include "FXUtilities.h"
-
+#include "MIdiMonitorComponent.h"
+#include "StutterEffectComponent.h"
 //==============================================================================
 /*
     This component lives inside our window, and this is where you should put all
@@ -206,6 +207,12 @@ private:
 
     FXChain masterFX; // Master FX Chain für alle Signale
 
+	std::unique_ptr<MidiMonitorComponent> midiMonitor;
+	std::unique_ptr<StutterEffectComponent> stutterEffect;
+
+    juce::AudioFormatManager formatManager;
+    std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
+    juce::AudioTransportSource transportSource;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

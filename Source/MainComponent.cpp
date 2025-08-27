@@ -58,6 +58,8 @@ MainComponent::MainComponent()
 	fxComponent->filterBypass.setToggleState(true, juce::sendNotification);
 	fxComponent->eqBypass.setToggleState(true, juce::sendNotification);
 
+	midiMonitor = std::make_unique<MidiMonitorComponent>();
+	stutterEffect = std::make_unique<StutterEffectComponent>();
 
 	// AudioDeviceManager initialisieren
 	// Add visible components
@@ -68,8 +70,10 @@ MainComponent::MainComponent()
 	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 3);
 
 	advancedDock.addComponentToNewRow(leftPlayList.get(), 1);
-	advancedDock.addComponentToNewColumn(fxComponent.get(),  1, 1, width / 3);
-	advancedDock.addComponentToNewColumn(rightPlayList.get(),1, 2,  width / 3);
+	advancedDock.addComponentToNewColumn(fxComponent.get(),  1, 1, width / 4);
+	advancedDock.addComponentToNewColumn(rightPlayList.get(),1, 2,  width / 4);
+	advancedDock.addComponentToNewColumn(midiMonitor.get(), 1, 3, width / 4);
+	advancedDock.addComponentToNewColumn(stutterEffect.get(), 1, 3, width / 4);
 
 	advancedDock.addComponentToNewRow(wave.get(), 2);
 
@@ -392,6 +396,9 @@ void MainComponent::prepareToPlay(int samplesPerBlockExpected, double sampleRate
 	spec.numChannels = 2; // Stereo
 
 	masterFX.prepare(spec);
+
+	// Prepare stutter effect
+	stutterEffect->prepareToPlay(sampleRate,samplesPerBlockExpected);
 }
 void MainComponent::releaseResources() {}
 
@@ -400,6 +407,9 @@ void MainComponent::handleIncomingMidiMessage(MidiInput* source, const MidiMessa
 	if (mixer)
 	{
 		mixer->handleMidiMessage(message);
+	}
+	if (midiMonitor) {
+		midiMonitor->addMidiEvent(message);
 	}
 
 }
@@ -534,15 +544,28 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 	// === 🎛️ MASTER FX PROCESSING - HIER PASSIERT DIE MAGIE! ===
 	processFXChain(masterFX, masterMixL, masterMixR, bufferToFill.numSamples);
 
-	// === Final Output zu Hardware ===
+	juce::AudioBuffer<float> tempBuffer(2, bufferToFill.numSamples);
+
+	// Kopiere Master Mix in temporären Buffer
+	for (int i = 0; i < bufferToFill.numSamples; ++i) {
+		tempBuffer.setSample(0, i, masterMixL[i]);
+		tempBuffer.setSample(1, i, masterMixR[i]);
+	}
+
+	// Wende Stutter-Effekt direkt auf den temporären Buffer an
+	if (stutterEffect) {
+		stutterEffect->processAudioBuffer(tempBuffer);
+	}
+
+	// === Final Output zu Hardware (mit Stutter-Effekt) ===
 	for (int j = 0; j < bufferToFill.numSamples; ++j) {
 		if (outNumChans > 0) {
-			outputData[0][j] = masterMixL[j];
-			masterLeftSum += masterMixL[j] * masterMixL[j];
+			outputData[0][j] = tempBuffer.getSample(0, j);
+			masterLeftSum += tempBuffer.getSample(0, j) * tempBuffer.getSample(0, j);
 		}
 		if (outNumChans > 1) {
-			outputData[1][j] = masterMixR[j];
-			masterRightSum += masterMixR[j] * masterMixR[j];
+			outputData[1][j] = tempBuffer.getSample(1, j);
+			masterRightSum += tempBuffer.getSample(1, j) * tempBuffer.getSample(1, j);
 		}
 	}
 
@@ -559,8 +582,8 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 		juce::AudioBuffer<float> levelBuffer(2, bufferToFill.numSamples);
 		for (int i = 0; i < bufferToFill.numSamples; ++i)
 		{
-			levelBuffer.setSample(0, i, masterMixL[i]);
-			levelBuffer.setSample(1, i, masterMixR[i]);
+			levelBuffer.setSample(0, i, tempBuffer.getSample(0, i));
+			levelBuffer.setSample(1, i, tempBuffer.getSample(1, i));
 		}
 
 		// === NEU: Level Updates an Mixer weiterleiten ===
