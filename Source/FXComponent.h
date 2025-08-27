@@ -420,7 +420,7 @@ public:
         presetArea.removeFromTop(5);
         presetCombo.setBounds(presetArea.removeFromTop(30));
 
-        auto masterArea = topControls.removeFromRight(140);
+        auto masterArea = topControls.removeFromRight(250);
         masterVolumeLabel.setBounds(masterArea.removeFromTop(25));
         masterArea.removeFromTop(10);
         masterVolumeKnob.setBounds(masterArea.removeFromTop(90));

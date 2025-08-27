@@ -139,16 +139,30 @@ float Sampler::interpolateSample(int channel, double position) const {
 }
 
 float Sampler::getSampleAt(int channel, long position) const {
-    if (!hasSample() || channel < 0 || channel >= sampleBuffer->getNumChannels()) {
+    juce::ScopedLock lock(bufferLock);
+
+    if (!sampleBuffer || !hasSample()) {
         return 0.0f;
     }
 
-    if (position >= 0 && position < sampleBuffer->getNumSamples()) {
-        juce::ScopedLock lock(bufferLock);
-        return sampleBuffer->getSample(channel, static_cast<int>(position));
+    const int numChannels = sampleBuffer->getNumChannels();
+    const int numSamples = sampleBuffer->getNumSamples();
+
+    if (numChannels == 0 || numSamples == 0) {
+        return 0.0f;
     }
 
-    return 0.0f;
+    // Clamp channel to valid range
+    const int safeChannel = juce::jlimit(0, numChannels - 1, channel);
+
+    // Clamp position to valid range
+    if (position < 0) return 0.0f;
+    if (position >= static_cast<long>(numSamples)) return 0.0f;
+
+    const int safePosition = static_cast<int>(juce::jmin(position,
+        static_cast<long>(numSamples - 1)));
+
+    return sampleBuffer->getSample(safeChannel, safePosition);
 }
 
 float Sampler::getOutput(int channel) {

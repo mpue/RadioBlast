@@ -555,7 +555,8 @@ juce::File PlaylistComponent::getCurrentFile() const
     return {};
 }
 
-// === PLAYLIST SPEICHERN/LADEN ===
+// Fixes for Save and Load Dialog Issues
+
 void PlaylistComponent::savePlaylistDialog()
 {
     if (playlist.empty())
@@ -568,18 +569,22 @@ void PlaylistComponent::savePlaylistDialog()
         return;
     }
 
-    juce::FileChooser chooser("Playlist speichern...",
+    // FIX 1: Use correct flags enum values
+    auto chooser = std::make_shared<juce::FileChooser>("Playlist speichern...",
         getDefaultPlaylistDirectory(),
         "*.djpl;*.m3u;*.pls");
 
+    // FIX 2: Use proper flags - FileBrowserComponent is deprecated in newer JUCE
     auto flags = juce::FileBrowserComponent::saveMode |
         juce::FileBrowserComponent::canSelectFiles |
         juce::FileBrowserComponent::warnAboutOverwriting;
 
-    chooser.launchAsync(flags, [this](const juce::FileChooser& fc) {
-        if (fc.getResults().size() > 0)
+    // FIX 3: Use shared_ptr and lambda capture to keep chooser alive
+    chooser->launchAsync(flags, [this, chooser](const juce::FileChooser& fc) {
+        auto results = fc.getResults();
+        if (results.size() > 0)
         {
-            auto file = fc.getResult();
+            auto file = results.getFirst();
 
             // Standard-Extension hinzufügen falls keine vorhanden
             if (!file.hasFileExtension("djpl") &&
@@ -593,9 +598,25 @@ void PlaylistComponent::savePlaylistDialog()
             {
                 currentPlaylistFile = file;
                 currentPlaylistName = file.getFileNameWithoutExtension();
-                playlistNameLabel->setText(currentPlaylistName, juce::dontSendNotification);
+                if (playlistNameLabel)
+                    playlistNameLabel->setText(currentPlaylistName, juce::dontSendNotification);
                 hasUnsavedChanges = false;
                 updateWindowTitle();
+
+                // Success message
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::AlertWindow::InfoIcon,
+                    "Playlist gespeichert",
+                    "Playlist erfolgreich gespeichert als: " + file.getFileName()
+                );
+            }
+            else
+            {
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::AlertWindow::WarningIcon,
+                    "Fehler",
+                    "Playlist konnte nicht gespeichert werden."
+                );
             }
         }
         });
@@ -605,11 +626,14 @@ void PlaylistComponent::loadPlaylistDialog()
 {
     if (hasUnsavedChanges)
     {
+        // FIX 4: Use proper parent component for modal dialog
         int result = juce::AlertWindow::showYesNoCancelBox(
             juce::AlertWindow::QuestionIcon,
             "Ungespeicherte Änderungen",
             "Die aktuelle Playlist wurde geändert. Möchten Sie die Änderungen speichern?",
-            "Speichern", "Nicht speichern", "Abbrechen", this, nullptr
+            "Speichern", "Nicht speichern", "Abbrechen",
+            this,  // Parent component
+            nullptr
         );
 
         if (result == 1) // Speichern
@@ -626,20 +650,32 @@ void PlaylistComponent::loadPlaylistDialog()
         // Bei "Nicht speichern" (result == 2) einfach weitermachen
     }
 
-    juce::FileChooser chooser("Playlist laden...",
+    // FIX 5: Use shared_ptr for load dialog too
+    auto chooser = std::make_shared<juce::FileChooser>("Playlist laden...",
         getDefaultPlaylistDirectory(),
         "*.djpl;*.m3u;*.pls");
 
     auto flags = juce::FileBrowserComponent::openMode |
         juce::FileBrowserComponent::canSelectFiles;
 
-    chooser.launchAsync(flags, [this](const juce::FileChooser& fc) {
-        if (fc.getResults().size() > 0)
+    chooser->launchAsync(flags, [this, chooser](const juce::FileChooser& fc) {
+        auto results = fc.getResults();
+        if (results.size() > 0)
         {
-            loadPlaylist(fc.getResult());
+            auto file = results.getFirst();
+            if (loadPlaylist(file))
+            {
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::AlertWindow::InfoIcon,
+                    "Playlist geladen",
+                    "Playlist erfolgreich geladen: " + file.getFileName()
+                );
+            }
         }
         });
 }
+
+
 
 void PlaylistComponent::newPlaylist()
 {

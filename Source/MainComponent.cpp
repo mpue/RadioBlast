@@ -53,16 +53,23 @@ MainComponent::MainComponent()
 	fxComponent = std::make_unique<AdvancedFXComponent>();
 	addAndMakeVisible(advancedDock);
 
+	fxComponent->chorusBypass.setToggleState(true, juce::sendNotification);
+	fxComponent->reverbBypass.setToggleState(true, juce::sendNotification);
+	fxComponent->filterBypass.setToggleState(true, juce::sendNotification);
+	fxComponent->eqBypass.setToggleState(true, juce::sendNotification);
+
+
 	// AudioDeviceManager initialisieren
 	// Add visible components
+	int width = getLocalBounds().getWidth();
 	advancedDock.addComponentToNewColumn(leftFileBrowser.get(), 0, 0);
 	advancedDock.addComponentToNewColumn(mixer.get(), 0, 1, 300);
 	advancedDock.addComponentToNewColumn(samplePlayer.get(), 0, 2, 300);
 	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 3);
 
 	advancedDock.addComponentToNewRow(leftPlayList.get(), 1);
-	advancedDock.addComponentToNewColumn(fxComponent.get(), 1, 1);
-	advancedDock.addComponentToNewColumn(rightPlayList.get(), 1, 2);
+	advancedDock.addComponentToNewColumn(fxComponent.get(),  1, 1, width / 3);
+	advancedDock.addComponentToNewColumn(rightPlayList.get(),1, 2,  width / 3);
 
 	advancedDock.addComponentToNewRow(wave.get(), 2);
 
