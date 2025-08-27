@@ -1,10 +1,9 @@
 /*
   ==============================================================================
-
     Sampler.cpp
     Created: 17 Apr 2018 1:12:15pm
     Author:  Matthias Pueski
-
+    Renovated: August 2025
   ==============================================================================
 */
 
@@ -12,69 +11,73 @@
 #include "../AudioManager.h"
 #include "SmartSample.h"
 
-using juce::CatmullRomInterpolator;
-using juce::AudioSampleBuffer;
-using juce::File;
-using juce::AudioFormatReader;
-using juce::ScopedPointer;
-using juce::AudioFormatReaderSource;
-using juce::InputStream;
+Sampler::Sampler(float sampleRate, int bufferSize)
+    : sampleRate(sampleRate)
+    , bufferSize(bufferSize)
+    , formatManager(std::make_unique<juce::AudioFormatManager>())
+    , sampleBuffer(std::make_unique<juce::AudioSampleBuffer>(2, 16384 * 1024))
+    , samplerEnvelope(std::make_unique<SynthLab::ADSR>())
+{
+    // Initialize format manager with common formats
+    formatManager->registerBasicFormats();
 
-Sampler::Sampler(float sampleRate, int bufferSize) {
-    this->sampleRate = sampleRate;
-    this->bufferSize = bufferSize;
-    this->manager = AudioManager::getInstance()->getFormatManager();
-    this->interpolatorLeft = new CatmullRomInterpolator();
-    this->interpolatorRight = new CatmullRomInterpolator();
-    this->sampleBuffer = new AudioSampleBuffer(2,16384*1024);
-    this->samplerEnvelope = new SynthLab::ADSR();
-    this->samplerEnvelope->setAttackRate(0.1 * sampleRate);
-    this->samplerEnvelope->setReleaseRate(0.3 * sampleRate);
+    // Initialize interpolators
+    initializeInterpolators();
+
+    // Configure envelope
+    samplerEnvelope->setAttackRate(0.1f * sampleRate);
+    samplerEnvelope->setReleaseRate(0.3f * sampleRate);
+    samplerEnvelope->setSustainLevel(1.0f);
+    samplerEnvelope->setDecayRate(0.1f * sampleRate);
 }
 
-Sampler::~Sampler() {
-	stop();
-    if (tempBufferLeft != nullptr)
-        delete this->tempBufferLeft;
-    if (tempBufferRight != nullptr)
-        delete this->tempBufferRight;
+void Sampler::initializeInterpolators() {
+    interpolatorLeft = std::make_unique<juce::CatmullRomInterpolator>();
+    interpolatorRight = std::make_unique<juce::CatmullRomInterpolator>();
+}
 
-	samplerEnvelope->reset();
-    delete samplerEnvelope;
-	samplerEnvelope = NULL;
-	delete interpolatorLeft;
-    delete interpolatorRight;
-    
+void Sampler::validateSampleBounds() {
+    if (sampleLength <= 0) return;
+
+    startPosition = juce::jlimit(0L, sampleLength - 1, startPosition);
+    endPosition = juce::jlimit(startPosition + 1, sampleLength, endPosition);
+    currentSample = juce::jlimit(startPosition, endPosition - 1, currentSample.load());
 }
 
 void Sampler::nextSample() {
-    if (sampleLength > 0) {
-        if (isLoop()) {
-            
-            if (currentSample < sampleLength - 1&& currentSample < endPosition) {
-                currentSample++;
-            }
-            else {
-                currentSample = startPosition;
-            }
-            // currentSample = (currentSample + 1) % sampleLength;
+    if (sampleLength <= 0 || !playing.load()) return;
+
+    const auto current = currentSample.load();
+
+    if (isLoop()) {
+        if (current < endPosition - 1) {
+            currentSample = current + 1;
         }
         else {
-            if (currentSample < sampleLength - 1 && currentSample < endPosition) {
-                currentSample++;
-            }
-            else {
-                playing = false;
-                currentSample = 0;
-            }
+            currentSample = startPosition;
         }
     }
-
+    else {
+        if (current < endPosition - 1) {
+            currentSample = current + 1;
+        }
+        else {
+            playing = false;
+            currentSample = startPosition;
+        }
+    }
 }
 
 void Sampler::play() {
+    if (!hasSample()) return;
+
     samplerEnvelope->gate(127);
     playing = true;
+
+    // Reset to start position if we're at the end
+    if (isDone()) {
+        reset();
+    }
 }
 
 void Sampler::stop() {
@@ -82,142 +85,162 @@ void Sampler::stop() {
     playing = false;
 }
 
-float Sampler::getCurrentSample(int channel){
-    
-    if (sampleLength > 0 && !isDone()) {
+void Sampler::reset() {
+    currentSample = startPosition;
+    samplerEnvelope->reset();
+}
 
-        if (pitch != 1) {
-            if (channel == 0) {
-                return tempBufferLeft[currentSample] * volume;
-            }
-            else {
-                return tempBufferRight[currentSample] * volume;
-            }
-        }
-        else {
-            if (currentSample < sampleBuffer->getNumSamples())
-                return sampleBuffer->getSample(channel, static_cast<int>(currentSample)) * volume;
-            else
-                return 0;
-        }
-
+float Sampler::getCurrentSample(int channel) const {
+    if (!hasSample() || isDone() || channel < 0 || channel >= 2) {
+        return 0.0f;
     }
-    
-    return 0;
+
+    const auto position = currentSample.load();
+    const auto pitchValue = pitch.load();
+
+    // Use interpolation for pitch shifting
+    if (std::abs(pitchValue - 1.0f) > 0.001f) {
+        return interpolateSample(channel, static_cast<double>(position) / pitchValue);
+    }
+
+    // Direct sample access for normal playback
+    if (position >= 0 && position < sampleBuffer->getNumSamples()) {
+        juce::ScopedLock lock(bufferLock);
+        return sampleBuffer->getSample(channel, static_cast<int>(position));
+    }
+
+    return 0.0f;
 }
 
-float Sampler::getSampleAt(int channel, long pos){
-    return sampleBuffer->getSample(channel, static_cast<int>(pos)) * volume;
+float Sampler::interpolateSample(int channel, double position) const {
+    if (!hasSample() || channel < 0 || channel >= sampleBuffer->getNumChannels()) {
+        return 0.0f;
+    }
+
+    juce::ScopedLock lock(bufferLock);
+
+    const int maxSample = sampleBuffer->getNumSamples() - 1;
+    if (position < 0.0 || position > maxSample) {
+        return 0.0f;
+    }
+
+    // Linear interpolation for real-time performance
+    const int intPos = static_cast<int>(position);
+    const float fraction = static_cast<float>(position - intPos);
+
+    if (intPos >= maxSample) {
+        return sampleBuffer->getSample(channel, maxSample);
+    }
+
+    const float sample1 = sampleBuffer->getSample(channel, intPos);
+    const float sample2 = sampleBuffer->getSample(channel, intPos + 1);
+
+    return sample1 + fraction * (sample2 - sample1);
 }
 
-void Sampler::loadSample(File file) {
+float Sampler::getSampleAt(int channel, long position) const {
+    if (!hasSample() || channel < 0 || channel >= sampleBuffer->getNumChannels()) {
+        return 0.0f;
+    }
+
+    if (position >= 0 && position < sampleBuffer->getNumSamples()) {
+        juce::ScopedLock lock(bufferLock);
+        return sampleBuffer->getSample(channel, static_cast<int>(position));
+    }
+
+    return 0.0f;
+}
+
+float Sampler::getOutput(int channel) {
+    if (!isPlaying()) {
+        return 0.0f;
+    }
+
+    const float sample = getCurrentSample(channel);
+    const float envelope = samplerEnvelope->process();
+    const float vol = volume.load();
+
+    return sample * envelope * vol;
+}
+
+void Sampler::loadSample(const juce::File& file) {
+    if (!file.exists()) return;
+
     SmartSample sample;
     sample.loadFromFile(file, sampleRate);
 
-    if (sampleBuffer != nullptr)
-        delete sampleBuffer;
+    if (sample.getLengthInSamples() <= 0) return;
 
-    sampleBuffer = new AudioSampleBuffer(sample.getBuffer());
-    sampleLength = sample.getLengthInSamples();
-    endPosition = sampleLength;
-    startPosition = 0;
-    currentSample = 0;
+    {
+        juce::ScopedLock lock(bufferLock);
 
-    // Mono-Fallback: wenn nur 1 Kanal vorhanden ist, dupliziere ihn für Rechts
-    if (sampleBuffer->getNumChannels() == 1) {
-        AudioSampleBuffer* stereoBuffer = new AudioSampleBuffer(2, sampleBuffer->getNumSamples());
-        stereoBuffer->copyFrom(0, 0, *sampleBuffer, 0, 0, sampleBuffer->getNumSamples());
-        stereoBuffer->copyFrom(1, 0, *sampleBuffer, 0, 0, sampleBuffer->getNumSamples());
-        delete sampleBuffer;
-        sampleBuffer = stereoBuffer;
+        // Create new buffer with sample data
+        sampleBuffer = std::make_unique<juce::AudioSampleBuffer>(sample.getBuffer());
+
+        // Handle mono to stereo conversion
+        if (sampleBuffer->getNumChannels() == 1) {
+            auto stereoBuffer = std::make_unique<juce::AudioSampleBuffer>(2, sampleBuffer->getNumSamples());
+            stereoBuffer->copyFrom(0, 0, *sampleBuffer, 0, 0, sampleBuffer->getNumSamples());
+            stereoBuffer->copyFrom(1, 0, *sampleBuffer, 0, 0, sampleBuffer->getNumSamples());
+            sampleBuffer = std::move(stereoBuffer);
+        }
+
+        // Update sample parameters
+        sampleLength = sample.getLengthInSamples();
+        endPosition = sampleLength;
+        startPosition = 0;
+        currentSample = 0;
     }
+
+    // Reset interpolators for new sample
+    initializeInterpolators();
 
     loaded = true;
+    setDirty(true);
 }
 
-void Sampler::loadSample(juce::InputStream* input) {
-    /*
-    AudioFormatReader* reader = manager->createReaderFor(std::make_unique<juce::InputStream>(input));
-    ScopedPointer<AudioFormatReaderSource> afr = new AudioFormatReaderSource(reader, true);
-    sampleBuffer = new AudioSampleBuffer(2, static_cast<int>(reader->lengthInSamples));
-    this->tempBufferLeft = new float[reader->lengthInSamples * 2];
-    this->tempBufferRight = new float[reader->lengthInSamples * 2];
-    
-    reader->read(sampleBuffer, 0, static_cast<int>(reader->lengthInSamples), 0, true, true);
-    sampleLength = reader->lengthInSamples;
-    endPosition = sampleLength;
-    startPosition = 0;
+void Sampler::loadSample(std::unique_ptr<juce::InputStream> input) {
+    if (!input) return;
+
+    auto reader = std::unique_ptr<juce::AudioFormatReader>(
+        formatManager->createReaderFor(std::move(input))
+    );
+
+    if (!reader) return;
+
+    const auto numSamples = static_cast<int>(reader->lengthInSamples);
+    const auto numChannels = juce::jmin(2, static_cast<int>(reader->numChannels));
+
+    {
+        juce::ScopedLock lock(bufferLock);
+
+        sampleBuffer = std::make_unique<juce::AudioSampleBuffer>(numChannels, numSamples);
+        reader->read(sampleBuffer.get(), 0, numSamples, 0, true, numChannels > 1);
+
+        // Handle mono to stereo conversion
+        if (numChannels == 1) {
+            auto stereoBuffer = std::make_unique<juce::AudioSampleBuffer>(2, numSamples);
+            stereoBuffer->copyFrom(0, 0, *sampleBuffer, 0, 0, numSamples);
+            stereoBuffer->copyFrom(1, 0, *sampleBuffer, 0, 0, numSamples);
+            sampleBuffer = std::move(stereoBuffer);
+        }
+
+        sampleLength = numSamples;
+        endPosition = sampleLength;
+        startPosition = 0;
+        currentSample = 0;
+    }
+
+    // Reset interpolators for new sample
+    initializeInterpolators();
+
     loaded = true;
-    */
+    setDirty(true);
 }
 
-
-void Sampler::setStartPosition(long start) {
-    this->startPosition = start;
-    this->currentSample = startPosition;
-}
-
-long Sampler::getStartPosition() {
-    return startPosition;
-}
-
-void Sampler::setEndPosition(long end) {
-    this->endPosition = end;
-}
-
-long Sampler::getEndPosition() {
-    return this->endPosition;
-}
-
-void Sampler::setSampleLength(long length) {
-    this->sampleLength = length;
-}
-
-long Sampler::getSampleLength(){
-    return this->sampleLength;
-}
-
-void Sampler::setLoop(bool loop) {
-    this->loop = loop;
-}
-
-float Sampler::getPitch() {
-    return pitch;
-}
-
-void Sampler::setPitch(float pitch) {
-    
-    this->pitch = pitch;
-    
-    if (pitch < 0.25) {
-        pitch = 0.25;
-    }
-    if (pitch > 2) {
-        pitch = 2;
-    }
-    
-    if (getSampleLength() > 0) {
-        if (this->tempBufferLeft == nullptr)
-            this->tempBufferLeft = new float[getSampleBuffer()->getNumSamples() * 2];
-        if (this->tempBufferRight == nullptr)
-            this->tempBufferRight = new float[getSampleBuffer()->getNumSamples() * 2];
-        interpolatorLeft->process(pitch, getSampleBuffer()->getReadPointer(0),tempBufferLeft , getSampleBuffer()->getNumSamples());
-        interpolatorLeft->process(pitch, getSampleBuffer()->getReadPointer(1),tempBufferRight, getSampleBuffer()->getNumSamples());
-    }
-
-}
-
-bool Sampler::isLoop() {
-    return this->loop;
-}
-
-void Sampler::setVolume(float volume) {
-    this->volume = volume;
-}
-
-AudioSampleBuffer* Sampler::getSampleBuffer() {
-    return sampleBuffer;
-}
-bool Sampler::hasSample() {
-    return loaded;
+void Sampler::setPitch(float newPitch) noexcept {
+    // Clamp pitch to reasonable range
+    const float clampedPitch = juce::jlimit(0.25f, 4.0f, newPitch);
+    pitch = clampedPitch;
+    setDirty(true);
 }
