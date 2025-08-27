@@ -154,28 +154,37 @@ MainComponent::MainComponent()
 		};
 
 
-	wave->onScrubbed = [this](int deck, double position) {
-		// Position des entsprechenden Samplers setzen
+	wave->onPositionChanged = [this](int deck, double pos, bool playing) {
 		if (deck == 0)  {
-			leftFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+			leftFileBrowser->getSampler()->setCurrentPosition((long)(pos * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
 		}
 		else if (deck == 1) {
-			rightFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+			rightFileBrowser->getSampler()->setCurrentPosition((long)(pos * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
 		}
 	};
 
-	wave->onPositionClicked = [this](int deck, double position) {
+	wave->onScrubStart = [this](int deck, double pos) {
 		if (deck == 0) {
-			leftFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+			leftFileBrowser->getSampler()->stop();
 		}
 		else if (deck == 1) {
-			rightFileBrowser->getSampler()->setCurrentPosition((long)(position * deviceManager.getCurrentAudioDevice()->getCurrentSampleRate()));
+			rightFileBrowser->getSampler()->stop();
+		}
+	};
+
+	wave->onScrubEnd = [this](int deck, double pos) {
+		if (deck == 0) {
+			leftFileBrowser->getSampler()->play();
+
+		}
+		else if (deck == 1) {
+			rightFileBrowser->getSampler()->play();
 		}
 	};
 
 	rightPlayList->onPlaylistFinished = [this]() {
 
-		};
+	};
 
 	updateFXParameters();
 
@@ -470,7 +479,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 		auto leftDest = mixer->getLeftChannelDestination();
 
 		if (mixer->isLeftChannelRoutedToMaster()) {
-			float masterGain = mixer->getLeftMasterGain() / mixer->getLeftChannelGain();
+			float masterGain = mixer->getLeftMasterGain();
 
 			switch (leftDest) {
 			case MixerComponent::OutputDestination::MasterLeft:
@@ -490,7 +499,7 @@ void MainComponent::getNextAudioBlock(const juce::AudioSourceChannelInfo& buffer
 		auto rightDest = mixer->getRightChannelDestination();
 
 		if (mixer->isRightChannelRoutedToMaster()) {
-			float masterGain = mixer->getRightMasterGain() / mixer->getRightChannelGain();
+			float masterGain = mixer->getRightMasterGain();
 
 			switch (rightDest) {
 			case MixerComponent::OutputDestination::MasterLeft:

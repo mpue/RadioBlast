@@ -523,8 +523,6 @@ public:
         //g.fillPath(arrow);
     }
 
-
-
     // === FONT CUSTOMIZATION ===
     juce::Font getTextButtonFont(juce::TextButton&, int buttonHeight) override
     {
