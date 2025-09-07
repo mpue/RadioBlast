@@ -1,12 +1,13 @@
 ﻿#include "MainComponent.h"
 #include "FXComponent.h"
 
+
 //==============================================================================
 MainComponent::MainComponent()
 	: TimeSliceThread("PropertyWatcher"),
-	resizerBar(&stretchableManager, 1, true)
+	resizerBar(&stretchableManager, 1, true), layoutManager(advancedDock, "defaultLayout")
 {
-	djLookAndFeel = std::make_unique<DJLookAndFeel>();
+	djLookAndFeel = std::make_unique<CyberpunkDJLookAndFeel>();
 	setLookAndFeel(djLookAndFeel.get());
 
 	setSize(1280, 800);
@@ -44,6 +45,7 @@ MainComponent::MainComponent()
 	rightDirectoryContents->addChangeListener(rightFileBrowser.get());
 
 	mixer = std::make_unique<MixerComponent>();
+	mixer->setSizeDisplayEnabled(true);
 	leftPlayList = std::make_unique<PlaylistComponent>();
 	rightPlayList = std::make_unique<PlaylistComponent>();
 
@@ -65,7 +67,7 @@ MainComponent::MainComponent()
 	// Add visible components
 	int width = getLocalBounds().getWidth();
 	advancedDock.addComponentToNewColumn(leftFileBrowser.get(), 0, 0);
-	advancedDock.addComponentToNewColumn(mixer.get(), 0, 1, 300);
+	advancedDock.addComponentToNewColumn(mixer.get(), 0, 1, 570);
 	advancedDock.addComponentToNewColumn(samplePlayer.get(), 0, 2, 300);
 	advancedDock.addComponentToNewColumn(rightFileBrowser.get(), 0, 3);
 
@@ -74,6 +76,16 @@ MainComponent::MainComponent()
 	advancedDock.addComponentToNewColumn(rightPlayList.get(),1, 2,  width / 4);
 	advancedDock.addComponentToNewColumn(midiMonitor.get(), 1, 3, width / 4);
 	advancedDock.addComponentToNewColumn(stutterEffect.get(), 1, 3, width / 4);
+
+	leftFileBrowser->setName("Browser A");
+	rightFileBrowser->setName("Browser B");
+	mixer->setName("Mixer");
+	leftPlayList->setName("Playlist A");
+	rightPlayList->setName("Playlist B");
+	samplePlayer->setName("Sample Player");
+	fxComponent->setName("FX");
+	midiMonitor->setName("MIDI Monitor");
+	stutterEffect->setName("Stutter FX");
 
 	advancedDock.addComponentToNewRow(wave.get(), 2);
 
@@ -169,20 +181,20 @@ MainComponent::MainComponent()
 
 	wave->onScrubStart = [this](int deck, double pos) {
 		if (deck == 0) {
-			leftFileBrowser->getSampler()->stop();
+		
 		}
 		else if (deck == 1) {
-			rightFileBrowser->getSampler()->stop();
+		
 		}
 	};
 
 	wave->onScrubEnd = [this](int deck, double pos) {
 		if (deck == 0) {
-			leftFileBrowser->getSampler()->play();
+		
 
 		}
 		else if (deck == 1) {
-			rightFileBrowser->getSampler()->play();
+		
 		}
 	};
 
@@ -193,10 +205,13 @@ MainComponent::MainComponent()
 	updateFXParameters();
 
 	resized();
+
+	layoutManager.loadLayoutOnStartup();
 }
 
 MainComponent::~MainComponent()
 {
+	layoutManager.saveLayoutOnShutdown();
 	setLookAndFeel(nullptr);
 	cleanupMidiInputs();
 	shutdownAudio();

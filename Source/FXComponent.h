@@ -2,51 +2,8 @@
 
 #include <JuceHeader.h>
 
-//==============================================================================
-class ModernKnob : public juce::Slider
-{
-public:
-    ModernKnob()
-    {
-        setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-        setTextBoxStyle(juce::Slider::TextBoxBelow, false, 60, 20);
-        setColour(juce::Slider::rotarySliderFillColourId, juce::Colour(0xff4a9eff));
-        setColour(juce::Slider::rotarySliderOutlineColourId, juce::Colour(0xff2a2a2a));
-        setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
-        setColour(juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
-        setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    }
 
-    void paint(juce::Graphics& g) override
-    {
-        auto bounds = getLocalBounds().toFloat();
-        auto centre = bounds.getCentre();
-        auto radius = juce::jmin(bounds.getWidth(), bounds.getHeight()) / 2.0f - 15.0f; // Mehr Platz für Text
-
-        // Background circle
-        g.setColour(juce::Colour(0xff333333)); // Einheitliche Farbe
-        g.fillEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f);
-
-        // Outline
-        g.setColour(juce::Colour(0xff3a3a3a));
-        g.drawEllipse(centre.x - radius, centre.y - radius, radius * 2.0f, radius * 2.0f, 2.0f);
-
-        // Value arc
-        auto toAngle = juce::MathConstants<float>::pi * 1.5f + (getValue() - getMinimum()) / (getMaximum() - getMinimum()) * juce::MathConstants<float>::pi * 1.5f;
-        auto fromAngle = juce::MathConstants<float>::pi * 0.75f;
-
-        juce::Path valueArc;
-        valueArc.addCentredArc(centre.x, centre.y, radius - 3, radius - 3, 0.0f, fromAngle, toAngle, true);
-
-        g.setColour(juce::Colour(0xff4a9eff));
-        g.strokePath(valueArc, juce::PathStrokeType(3.0f));
-
-        // Center dot
-        g.setColour(juce::Colours::white);
-        g.fillEllipse(centre.x - 2, centre.y - 2, 4, 4);
-
-    }
-};
+using juce::Slider;
 
 //==============================================================================
 class FXSection : public juce::Component
@@ -133,18 +90,18 @@ public:
         typeCombo.setBounds(bounds.removeFromTop(25).reduced(20, 0));
     }
 
-    ModernKnob cutoffKnob, resonanceKnob, driveKnob;
+    Slider cutoffKnob, resonanceKnob, driveKnob;
     juce::ComboBox typeCombo;
     juce::Label typeLabel;
 
 private:
-    void setupKnob(ModernKnob& knob, const juce::String& suffix, float min, float max, float defaultVal)
+    void setupKnob(Slider& knob, const juce::String& suffix, float min, float max, float defaultVal)
     {
         addAndMakeVisible(knob);
         knob.setRange(min, max);
         knob.setValue(defaultVal);
         knob.setTextValueSuffix(suffix == "Cutoff" ? " Hz" : "");
-        knob.setNumDecimalPlacesToDisplay(suffix == "Cutoff" ? 0 : 1);
+        knob.setNumDecimalPlacesToDisplay(suffix == "Cutoff" ? 0 : 1);        
     }
 };
 
@@ -180,12 +137,14 @@ public:
         highFreqKnob.setBounds(bottomRow.removeFromLeft(80));
     }
 
-    ModernKnob lowKnob, midKnob, highKnob;
-    ModernKnob lowFreqKnob, highFreqKnob;
+    Slider lowKnob, midKnob, highKnob;
+    Slider lowFreqKnob, highFreqKnob;
 
 private:
-    void setupKnob(ModernKnob& knob, const juce::String& name, float min, float max, float defaultVal)
+    void setupKnob(Slider& knob, const juce::String& name, float min, float max, float defaultVal)
     {
+        knob.setSliderStyle(Slider::RotaryHorizontalVerticalDrag);        
+		knob.setTextBoxStyle(Slider::NoTextBox,false,0 ,0);
         addAndMakeVisible(knob);
         knob.setRange(min, max);
         knob.setValue(defaultVal);
@@ -225,11 +184,13 @@ public:
         mixKnob.setBounds(bottomRow.removeFromLeft(80));
     }
 
-    ModernKnob rateKnob, depthKnob, feedbackKnob, mixKnob;
+    Slider rateKnob, depthKnob, feedbackKnob, mixKnob;
 
 private:
-    void setupKnob(ModernKnob& knob, const juce::String& name, float min, float max, float defaultVal)
+    void setupKnob(Slider& knob, const juce::String& name, float min, float max, float defaultVal)
     {
+        knob.setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
+        knob.setTextBoxStyle(Slider::NoTextBox, false, 0, 0);
         addAndMakeVisible(knob);
         knob.setRange(min, max);
         knob.setValue(defaultVal);
@@ -275,16 +236,19 @@ public:
         widthKnob.setBounds(bottomRow.removeFromLeft(80));
     }
 
-    ModernKnob roomSizeKnob, dampingKnob, wetKnob, dryKnob, widthKnob;
+    Slider roomSizeKnob, dampingKnob, wetKnob, dryKnob, widthKnob;
 
 private:
-    void setupKnob(ModernKnob& knob, const juce::String& name, float min, float max, float defaultVal)
+    void setupKnob(Slider& knob, const juce::String& name, float min, float max, float defaultVal)
     {
         addAndMakeVisible(knob);
+        knob.setSliderStyle(Slider::RotaryHorizontalVerticalDrag);
+        knob.setTextBoxStyle(Slider::NoTextBox, false, 0, 0);
         knob.setRange(min, max);
         knob.setValue(defaultVal);
         knob.setTextValueSuffix("%");
         knob.setNumDecimalPlacesToDisplay(1);
+		knob.setSliderStyle(juce::Slider::Rotary);
     }
 };
 
@@ -460,7 +424,7 @@ public:
 
     // Öffentliche Member für Parameter Binding
     juce::ToggleButton filterBypass, eqBypass, chorusBypass, reverbBypass;
-    ModernKnob masterVolumeKnob;
+    Slider masterVolumeKnob;
     juce::ComboBox presetCombo;
 
 private:

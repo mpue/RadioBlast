@@ -8,6 +8,12 @@
 
 namespace BinaryData
 {
+    extern const char*   Fader_png;
+    const int            Fader_pngSize = 19460;
+
+    extern const char*   Knob_64_png;
+    const int            Knob_64_pngSize = 495933;
+
     extern const char*   splash_png;
     const int            splash_pngSize = 394797;
 
@@ -18,7 +24,7 @@ namespace BinaryData
     const int            RadioBlast_pngSize = 716976;
 
     // Number of elements in the namedResourceList and originalFileNames arrays.
-    const int namedResourceListSize = 3;
+    const int namedResourceListSize = 5;
 
     // Points to the start of a list of resource names.
     extern const char* namedResourceList[];

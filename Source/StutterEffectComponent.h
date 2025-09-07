@@ -37,6 +37,10 @@ private:
     juce::TextButton stutterButton1, stutterButton2, stutterButton3, stutterButton4;
     juce::Label titleLabel;
 
+    // Parameter Controls
+    juce::Slider lengthSlider, intensitySlider, feedbackSlider, mixSlider;
+    juce::Label lengthLabel, intensityLabel, feedbackLabel, mixLabel;
+
     // Stutter parameters
     struct StutterParams
     {
@@ -46,12 +50,19 @@ private:
         float fadeCounter = 0.0f;
         StutterType type = CLASSIC_STUTTER;
         bool bufferCaptured = false;
+
+        // User controllable parameters
+        float length = 0.5f;        // 0.1 - 2.0 (multiplier for subdivision length)
+        float intensity = 0.8f;     // 0.0 - 1.0 (effect strength)
+        float feedback = 0.3f;      // 0.0 - 0.9 (for repeating effects)
+        float mix = 1.0f;           // 0.0 - 1.0 (dry/wet mix)
     };
 
     StutterParams stutterState;
 
     // Audio buffer for storing stuttered audio
     juce::AudioBuffer<float> stutterBuffer;
+    juce::AudioBuffer<float> dryBuffer;  // For dry/wet mixing
 
     // Audio parameters
     double currentSampleRate = 44100.0;
@@ -63,10 +74,12 @@ private:
     // Helper functions
     void startStutter(StutterType type, int subdivision);
     void stopStutter();
+    void updateParameters();
     void processClassicStutter(juce::AudioBuffer<float>& buffer);
     void processGateStutter(juce::AudioBuffer<float>& buffer);
     void processReverseStutter(juce::AudioBuffer<float>& buffer);
     void processPitchedStutter(juce::AudioBuffer<float>& buffer);
+    void applyDryWetMix(juce::AudioBuffer<float>& wetBuffer, const juce::AudioBuffer<float>& dryBuffer);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(StutterEffectComponent)
 };

@@ -6,7 +6,8 @@
 #include "MixerComponent.h"
 #include "JDockableWindows.h"
 #include "JAdvancedDock.h"
-#include "DJLookAndFeel.h"
+#include "DockLayoutManager.h"
+#include "CyberpunkDJLookAndFeel.h"
 #include "WaveformGenerator.h"
 #include "DualWavefromComponent.h"
 #include "SamplePlayer.h"
@@ -186,7 +187,7 @@ private:
     juce::AudioDeviceManager audioDeviceManager;
     juce::ApplicationProperties appProperties;
 
-    std::unique_ptr<DJLookAndFeel> djLookAndFeel;
+    std::unique_ptr<CyberpunkDJLookAndFeel> djLookAndFeel;
     std::unique_ptr<SamplePlayer> samplePlayer;
 
     float leftChannelRMS = 0.0f;
@@ -213,6 +214,8 @@ private:
     juce::AudioFormatManager formatManager;
     std::unique_ptr<juce::AudioFormatReaderSource> readerSource;
     juce::AudioTransportSource transportSource;
+
+    DockLayoutManager layoutManager;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

@@ -1,5 +1,5 @@
 /*==============================================================================
-  DualWaveformComponent.h
+  DualWaveformComponent.h - COMPLETE FIXED VERSION
   Created: 26 Aug 2025
   Author:  mpue
 
@@ -96,12 +96,27 @@ public:
         deck1Area.removeFromLeft(60);
         deck2Area.removeFromLeft(60);
 
-        WaveformGenerator::drawWaveform(g, deck1Waveform, juce::Rectangle<float>(deck1Area.toFloat()),juce::Colours::grey.withAlpha(0.7f),zoomFactor);
-        WaveformGenerator::drawWaveform(g, deck2Waveform, juce::Rectangle<float>(deck2Area.toFloat()), juce::Colours::grey.withAlpha(0.7f), zoomFactor);
+        // Calculate visible time range for both decks
+        double maxLength = juce::jmax(deck1Length, deck2Length);
+        double visibleLength = maxLength / zoomFactor;
+        double startTime = viewStart;
+        double endTime = startTime + visibleLength;
 
-        // Draw playback position marker
-        
+        // Draw time grid
+        drawTimeGrid(g, deck1Area, startTime, endTime);
+        drawTimeGrid(g, deck2Area, startTime, endTime);
 
+        // Draw waveforms using WaveformGenerator
+        WaveformGenerator::drawWaveform(g, deck1Waveform, juce::Rectangle<float>(deck1Area.toFloat()),
+            juce::Colours::cyan.withAlpha(0.7f), zoomFactor);
+        WaveformGenerator::drawWaveform(g, deck2Waveform, juce::Rectangle<float>(deck2Area.toFloat()),
+            juce::Colours::orange.withAlpha(0.7f), zoomFactor);
+
+        // Draw playback position markers - MIT OFFSET!
+        drawPlaybackMarker(g, deck1Area, deck1Position, startTime, endTime,
+            juce::Colours::cyan, deck1Playing, 0.0);
+        drawPlaybackMarker(g, deck2Area, deck2Position, startTime, endTime,
+            juce::Colours::orange, deck2Playing, alignmentOffset);  // <-- HIER ist der Offset!
 
         // Draw alignment indicators if in alignment mode
         if (isAligning)
@@ -115,8 +130,6 @@ public:
 
         // Draw zoom and time info
         drawInfoOverlay(g);
-
-
     }
 
     void resized() override
@@ -127,12 +140,10 @@ public:
     // === ENHANCED WAVEFORM DATA ===
     void setWaveformData(int deck, WaveformGenerator::WaveformData data)
     {
-
-
         if (deck == 0)
         {
             deck1Waveform = data;
-			deck1Length = data.duration;
+            deck1Length = data.duration;
         }
         else if (deck == 1)
         {
@@ -146,14 +157,12 @@ public:
     {
         if (deck == 0)
         {
-
             deck1Length = 0.0;
             deck1Position = 0.0;
             deck1Playing = false;
         }
         else if (deck == 1)
         {
-
             deck2Length = 0.0;
             deck2Position = 0.0;
             deck2Playing = false;
@@ -282,6 +291,18 @@ public:
         deck1Area.removeFromLeft(60);
         deck2Area.removeFromLeft(60);
 
+        if (e.mods.isMiddleButtonDown())
+        {
+            // EINFACH: Mittlere Maustaste = Alignment Mode
+            isAligning = true;
+            alignmentStartPos = e.getPosition();
+            lastAlignmentOffset = alignmentOffset;
+            setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            repaint();
+            return;
+        }
+
+        // Normal scrubbing
         int clickedDeck = -1;
         double clickPosition = 0.0;
 
@@ -304,7 +325,6 @@ public:
             }
             else
             {
-                // Start scrubbing
                 startScrubbing(clickedDeck, clickPosition);
             }
         }
@@ -312,13 +332,29 @@ public:
 
     void mouseDrag(const juce::MouseEvent& e) override
     {
+        if (isAligning)
+        {
+            // EINFACH: Horizontal drag = Wave offset ändern
+            int dragDistance = e.getPosition().x - alignmentStartPos.x;
+
+            // Pixel zu Zeit (einfacher Faktor)
+            double timePerPixel = 0.01; // 0.01 Sekunden pro Pixel
+            alignmentOffset = lastAlignmentOffset + (dragDistance * timePerPixel);
+
+            // Limit auf ±10 Sekunden
+            alignmentOffset = juce::jlimit(-10.0, 10.0, alignmentOffset);
+
+            repaint();
+            return;
+        }
+
+        // Normal scrubbing
         if (isDragging && dragDeck >= 0)
         {
             double length = (dragDeck == 0) ? deck1Length : deck2Length;
             double newPosition = pixelToTime(e.x - 60, length);
             newPosition = juce::jlimit(0.0, length, newPosition);
 
-            // Update position immediately for responsive scrubbing
             if (dragDeck == 0)
             {
                 deck1Position = newPosition;
@@ -328,10 +364,9 @@ public:
                 deck2Position = newPosition;
             }
 
-            // Notify about position change during scrubbing
             if (onPositionChanged)
             {
-                onPositionChanged(dragDeck, newPosition, false); // Not playing during scrub
+                onPositionChanged(dragDeck, newPosition, false);
             }
 
             repaint();
@@ -340,6 +375,15 @@ public:
 
     void mouseUp(const juce::MouseEvent& e) override
     {
+        if (isAligning)
+        {
+            // EINFACH: Alignment beenden
+            isAligning = false;
+            setMouseCursor(juce::MouseCursor::NormalCursor);
+            repaint();
+            return;
+        }
+
         if (isDragging && dragDeck >= 0)
         {
             endScrubbing(dragDeck);
@@ -530,20 +574,33 @@ private:
 
     void endWaveAlignment()
     {
+        if (!isAligning) return;
+
         isAligning = false;
         setMouseCursor(juce::MouseCursor::NormalCursor);
 
-        // Apply the alignment offset to the audio engine
-        if (onPositionChanged && alignmentOffset != 0.0)
+        // KORREKTE IMPLEMENTATION: Wende Alignment-Offset tatsächlich an
+        if (std::abs(alignmentOffset) > 0.01) // Minimum threshold
         {
-            // Notify about alignment change - could be used to adjust one deck's position
-            // The receiving component can decide which deck to adjust
-            if (std::abs(alignmentOffset) > 0.01) // Minimum threshold
+            // Berechne neue Position für Deck B basierend auf Alignment
+            double newDeck2Position = deck2Position + alignmentOffset;
+            newDeck2Position = juce::jlimit(0.0, deck2Length, newDeck2Position);
+
+            // Setze die neue Position
+            deck2Position = newDeck2Position;
+
+            // Benachrichtige über Positionsänderung
+            if (onPositionChanged)
             {
-                // Could trigger a nudge/slip on the appropriate deck
-                // Implementation depends on your audio engine
+                onPositionChanged(1, newDeck2Position, deck2Playing);
             }
+
+            // Reset alignment offset nach dem Anwenden
+            alignmentOffset = 0.0;
+            lastAlignmentOffset = 0.0;
         }
+
+        repaint();
     }
 
     void resetAlignment()
@@ -585,13 +642,6 @@ private:
             g.setColour(juce::Colours::orange);
             g.fillEllipse(label2Area.getX() + 5, label2Area.getCentreY() - 3, 6, 6);
         }
-    }
-
-    void drawWaveform(juce::Graphics& g, juce::Rectangle<int> area,
-        const std::vector<float>& waveform, double position,
-        double length, juce::Colour colour, int deckIndex, bool isPlaying)
-    {
-        
     }
 
     void drawPlaybackMarker(juce::Graphics& g, juce::Rectangle<int> area,
@@ -688,8 +738,8 @@ private:
         juce::String zoomInfo = "Zoom: " + juce::String(zoomFactor, 1) + "x";
         g.drawText(zoomInfo, 10, getHeight() - 20, 100, 15, juce::Justification::left);
 
-        juce::String controlInfo = "Left: Scrub | Middle: Align Waves | Ctrl+Wheel: Zoom";
-        g.drawText(controlInfo, getWidth() - 300, getHeight() - 20, 295, 15, juce::Justification::right);
+        juce::String controlInfo = "Left: Scrub | Shift+Drag: Align Waves | Ctrl+Wheel: Zoom";
+        g.drawText(controlInfo, getWidth() - 350, getHeight() - 20, 345, 15, juce::Justification::right);
 
         // Show alignment offset if active
         if (std::abs(alignmentOffset) > 0.01 || isAligning)
@@ -707,40 +757,27 @@ private:
 
     void drawAlignmentIndicators(juce::Graphics& g, juce::Rectangle<int> area, int deckIndex)
     {
-        // Draw alignment guides and offset indicators
-        g.setColour(juce::Colours::yellow.withAlpha(0.7f));
+        if (!isAligning) return;
 
-        // Center line for reference
+        // EINFACH: Zeige nur eine gestrichelte Linie als Referenz
+        g.setColour(juce::Colours::yellow.withAlpha(0.8f));
+
+        // Gestrichelte Linie in der Mitte als Referenz
         int centerX = area.getCentreX();
-        g.drawVerticalLine(centerX, (float)area.getY(), (float)area.getBottom());
 
-        // Offset indicator
-        if (deckIndex == 1 && std::abs(alignmentOffset) > 0.001) // Only show on deck B
+        // Zeichne gestrichelte vertikale Linie
+        for (int y = area.getY(); y < area.getBottom(); y += 10)
         {
-            double maxLength = juce::jmax(deck1Length, deck2Length);
-            double visibleLength = maxLength / zoomFactor;
-            double pixelsPerSecond = (getWidth() - 60) / visibleLength;
-            int offsetPixels = (int)(alignmentOffset * pixelsPerSecond);
+            g.drawVerticalLine(centerX, (float)y, (float)(y + 5));
+        }
 
-            int offsetX = centerX + offsetPixels;
-            g.setColour(juce::Colours::red.withAlpha(0.8f));
-            g.drawVerticalLine(offsetX, (float)area.getY(), (float)area.getBottom());
-
-            // Draw arrow indicating direction
-            juce::Path arrow;
-            if (alignmentOffset > 0)
-            {
-                arrow.addTriangle(offsetX + 5, area.getCentreY() - 5,
-                    offsetX + 5, area.getCentreY() + 5,
-                    offsetX + 15, area.getCentreY());
-            }
-            else
-            {
-                arrow.addTriangle(offsetX - 5, area.getCentreY() - 5,
-                    offsetX - 5, area.getCentreY() + 5,
-                    offsetX - 15, area.getCentreY());
-            }
-            g.fillPath(arrow);
+        // Zeige Text-Info nur bei Deck B
+        if (deckIndex == 1)
+        {
+            g.setColour(juce::Colours::white);
+            g.setFont(12.0f);
+            juce::String info = "Drag to align waves";
+            g.drawText(info, area.getCentreX() - 60, area.getY() + 10, 120, 20, juce::Justification::centred);
         }
     }
 
@@ -969,15 +1006,17 @@ private:
                     resetAlignment();
                     break;
                 case 10:
-                    // Fine nudge left (0.01 seconds)
-                    alignmentOffset -= 0.01;
-                    alignmentOffset = juce::jlimit(-30.0, 30.0, alignmentOffset);
+                    // Fine nudge left (0.01 seconds) - wendet direkt auf Deck B an
+                    deck2Position = juce::jlimit(0.0, deck2Length, deck2Position - 0.01);
+                    if (onPositionChanged)
+                        onPositionChanged(1, deck2Position, deck2Playing);
                     repaint();
                     break;
                 case 11:
-                    // Fine nudge right (0.01 seconds)
-                    alignmentOffset += 0.01;
-                    alignmentOffset = juce::jlimit(-30.0, 30.0, alignmentOffset);
+                    // Fine nudge right (0.01 seconds) - wendet direkt auf Deck B an
+                    deck2Position = juce::jlimit(0.0, deck2Length, deck2Position + 0.01);
+                    if (onPositionChanged)
+                        onPositionChanged(1, deck2Position, deck2Playing);
                     repaint();
                     break;
                 }
@@ -985,5 +1024,4 @@ private:
     }
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DualWaveformComponent);
-
- };
+};
